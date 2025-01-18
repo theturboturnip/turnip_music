@@ -1,6 +1,66 @@
-import 'package:flutter/material.dart';
+import 'dart:io';
 
-void main() {
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'package:sqflite/sqflite.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:path/path.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:turnip_music/library/data/db.dart';
+import 'package:turnip_music/library/library.dart';
+import 'package:turnip_music/repos/db/db_repo.dart';
+import 'package:turnip_music/repos/db/db_user.dart';
+
+Future<void> main() async {
+  // Use sqflite on MacOS/iOS/Android.
+  WidgetsFlutterBinding.ensureInitialized();
+  if (kIsWeb) {
+    throw "This application requires SQFlite and does not currently enable that on web.";
+  } else {
+    // Use ffi on Linux and Windows.
+    if (Platform.isLinux || Platform.isWindows) {
+      databaseFactory = databaseFactoryFfi;
+      sqfliteFfiInit();
+    }
+  }
+
+  // Pick a path for the database. In debug mode this may be in an ephemeral directory such as a temp directory,
+  // but it still needs to be a real file for the backup/restore functionality to work.
+
+  late final String dbFolder;
+
+  if (Platform.isAndroid) {
+    dbFolder = await getDatabasesPath();
+  } else if (Platform.isIOS || Platform.isMacOS) {
+    dbFolder = (await getLibraryDirectory()).path;
+  } else if (kDebugMode) {
+    dbFolder = (await getTemporaryDirectory()).path;
+  } else {
+    dbFolder = (await getApplicationDocumentsDirectory()).path;
+  }
+
+  final dbPath = join(
+    dbFolder,
+    "turnip_music.db",
+  );
+  if (kDebugMode) {
+    // truncate the file to clear the db
+    await File(dbPath).openWrite().close();
+  }
+
+  final libraryDbUser = LibraryDbUser();
+  final libraryPlugins = getLibraryPluginsForPlatform();
+
+  var dbUsers = <String, DbUser>{
+    for (var dbUser in [
+      libraryDbUser,
+      ...libraryPlugins,
+    ])
+      dbUser.id: dbUser
+  };
+
+  final dbRepo = await DbRepo.createDatabase(dbPath, dbUsers);
+
   runApp(const MyApp());
 }
 
@@ -28,7 +88,7 @@ class MyApp extends StatelessWidget {
         //
         // This works for code too, not just values: Most code changes can be
         // tested with just a hot reload.
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
+        colorScheme: ColorScheme.fromSeed(seedColor: (kDebugMode) ? Colors.red : Colors.green),
         useMaterial3: true,
       ),
       home: const MyHomePage(title: 'Flutter Demo Home Page'),

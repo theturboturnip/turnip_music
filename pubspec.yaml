@@ -39,6 +39,11 @@ dependencies:
   android_music_store:
     path: ./plugins/android_music_store
   flutter_plugin_android_lifecycle: ^2.0.24
+  sqflite: ^2.4.1
+  path_provider: ^2.1.5
+  mutex: ^3.1.0
+  sqflite_common_ffi: ^2.3.4+4
+  path: ^1.9.0
 
 dev_dependencies:
   flutter_test:

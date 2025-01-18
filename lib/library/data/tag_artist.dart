@@ -21,17 +21,17 @@ class ArtistBacking {
   final String backendId;
   // A theoretically unique ID within this backend
   final String idInBackend;
-  // A fallback identifier within the backend which can be used if the main id falls out from under you.
+  // A set of fallback metadata within the backend which can be used if the main id falls out from under you.
   // Unlikely to be useful in e.g. Spotify's case, but local files can be flaky.
-  final String fallbackIdInBackend;
-  // TODO?
-  final Uri coverArtInBackend;
+  final List<String> fallbackMetadataInBackend;
+  // A Uri pointing to the artist's cover art dictated by this backend.
+  final String? coverArtInBackend;
 
   ArtistBacking({
     required this.artistId,
     required this.backendId,
     required this.idInBackend,
-    required this.fallbackIdInBackend,
+    required this.fallbackMetadataInBackend,
     required this.coverArtInBackend,
   });
 }
