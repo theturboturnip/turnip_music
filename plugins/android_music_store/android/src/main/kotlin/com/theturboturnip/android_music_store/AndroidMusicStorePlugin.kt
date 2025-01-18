@@ -2,29 +2,42 @@ package com.theturboturnip.android_music_store
 
 import AlbumSummary
 import Song
+import android.content.ContentUris
 import android.content.Context
-import android.os.Build
+import android.graphics.Bitmap
 import android.provider.MediaStore
 import android.util.Log
-
+import android.util.Size
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.coroutineScope
 import io.flutter.embedding.engine.plugins.FlutterPlugin
+import io.flutter.embedding.engine.plugins.activity.ActivityAware
+import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
+import io.flutter.embedding.engine.plugins.lifecycle.FlutterLifecycleAdapter
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler
 import io.flutter.plugin.common.MethodChannel.Result
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import java.io.ByteArrayOutputStream
+import java.io.FileNotFoundException
+
 
 /** AndroidMusicStorePlugin */
-class AndroidMusicStorePlugin: FlutterPlugin, MethodCallHandler {
+class AndroidMusicStorePlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
   /// The MethodChannel that will the communication between Flutter and native Android
   ///
   /// This local reference serves to register the plugin with the Flutter Engine and unregister it
   /// when the Flutter Engine is detached from the Activity
   private lateinit var channel : MethodChannel
-  private var context : Context? = null
+  private var applicationContext : Context? = null
+  private var lifecycle : Lifecycle? = null
 
   override fun onAttachedToEngine(flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
-    context = flutterPluginBinding.applicationContext
+    applicationContext = flutterPluginBinding.applicationContext
     channel = MethodChannel(flutterPluginBinding.binaryMessenger, "android_music_store")
     channel.setMethodCallHandler(this)
   }
@@ -33,32 +46,20 @@ class AndroidMusicStorePlugin: FlutterPlugin, MethodCallHandler {
     if (call.method == "listAllAlbums") {
       val albumList = mutableListOf<AlbumSummary>()
 
-      val collection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-        MediaStore.Audio.Albums.getContentUri(
-          MediaStore.VOLUME_EXTERNAL
-        )
-      } else {
-        MediaStore.Audio.Albums.EXTERNAL_CONTENT_URI
-      }
+      val collection = MediaStore.Audio.Albums.getContentUri(
+        MediaStore.VOLUME_EXTERNAL
+      )
 
-      val projection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-          arrayOf(
-            MediaStore.Audio.Albums._ID,
-            MediaStore.Audio.Albums.ALBUM,
-            MediaStore.Audio.Albums.NUMBER_OF_SONGS,
-            MediaStore.Audio.Albums.ARTIST,
-            MediaStore.Audio.Albums.ARTIST_ID,
-          )
-      } else {
-        arrayOf(
-          MediaStore.Audio.Albums._ID,
-          MediaStore.Audio.Albums.ALBUM,
-          MediaStore.Audio.Albums.NUMBER_OF_SONGS,
-          MediaStore.Audio.Albums.ARTIST,
-        )
-      }
+      val projection = arrayOf(
+        MediaStore.Audio.Albums._ID,
+        MediaStore.Audio.Albums.ALBUM,
+        MediaStore.Audio.Albums.NUMBER_OF_SONGS,
+        MediaStore.Audio.Albums.ARTIST,
+        MediaStore.Audio.Albums.ARTIST_ID,
+      )
 
-        val query = context?.contentResolver?.query(
+
+      val query = applicationContext?.contentResolver?.query(
         collection,
         projection,
         null,
@@ -79,9 +80,9 @@ class AndroidMusicStorePlugin: FlutterPlugin, MethodCallHandler {
         val artistColumn = cursor.getColumnIndexOrThrow(
           MediaStore.Audio.Albums.ARTIST
         )
-        val artistIdColumn = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) cursor.getColumnIndexOrThrow(
+        val artistIdColumn = cursor.getColumnIndexOrThrow(
           MediaStore.Audio.Albums.ARTIST_ID
-        ) else null;
+        )
 
         while (cursor.moveToNext()) {
           // Get values of columns for a given video.
@@ -89,7 +90,7 @@ class AndroidMusicStorePlugin: FlutterPlugin, MethodCallHandler {
           val album = cursor.getString(albumColumn)
           val numberOfSongs = cursor.getLong(numberOfSongsColumn)
           val artist = cursor.getString(artistColumn)
-          val artistId = if (artistIdColumn == null) -1 else cursor.getLong(artistIdColumn)
+          val artistId = cursor.getLong(artistIdColumn)
 
           // Stores column values and the contentUri in a local object
           // that represents the media file.
@@ -99,7 +100,7 @@ class AndroidMusicStorePlugin: FlutterPlugin, MethodCallHandler {
         }
       }
 
-      Log.i("MUSIC STORE PLUGIN", "albums: "+ albumList.size);
+      Log.i("MUSIC STORE PLUGIN", "albums: "+ albumList.size)
 
       if (query == null) {
         result.error("null_context", "Android Media Store plugin had a lifecycle problem.", null)
@@ -111,13 +112,9 @@ class AndroidMusicStorePlugin: FlutterPlugin, MethodCallHandler {
 
       val albumId = call.arguments<List<String?>>()?.get(0)
 
-      val collection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-        MediaStore.Audio.Media.getContentUri(
-          MediaStore.VOLUME_EXTERNAL
-        )
-      } else {
-        MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
-      }
+      val collection = MediaStore.Audio.Media.getContentUri(
+        MediaStore.VOLUME_EXTERNAL
+      )
 
       val projection = arrayOf(
         MediaStore.Audio.Media._ID,
@@ -130,7 +127,7 @@ class AndroidMusicStorePlugin: FlutterPlugin, MethodCallHandler {
         MediaStore.Audio.Media.TRACK,
       )
 
-      val query = context?.contentResolver?.query(
+      val query = applicationContext?.contentResolver?.query(
         collection,
         projection,
         "${MediaStore.Audio.Media.ALBUM_ID} = ?",
@@ -185,6 +182,54 @@ class AndroidMusicStorePlugin: FlutterPlugin, MethodCallHandler {
       } else {
         result.success(songList.map { Json.encodeToString(Song.serializer(), it) })
       }
+    } else if (call.method == "requestArtsForAlbums") {
+      val args = call.arguments<List<String>>()
+
+      val albumIds: Sequence<Long>?
+      val thumbSize: Int?
+      try {
+        thumbSize = args?.get(0)?.toInt()
+        albumIds = args?.listIterator(1)?.asSequence()?.map { it.toLong() }
+      } catch (ex: NumberFormatException) {
+        result.error("nan_album_id", "resolveAlbumArtThumb got non-number arguments: $args", null)
+        return
+      }
+
+      if (albumIds == null || thumbSize == null) {
+        result.error("null_album_id", "resolveAlbumArtThumb got null arguments: $albumIds $thumbSize", null)
+      } else {
+        lifecycle?.coroutineScope?.launch(Dispatchers.IO) {
+          albumIds.forEach {
+            val contentUri = ContentUris.withAppendedId(
+              MediaStore.Audio.Albums.EXTERNAL_CONTENT_URI,
+              it
+            )
+
+            val bitmap = try {
+              applicationContext?.contentResolver?.loadThumbnail(contentUri, Size(thumbSize, thumbSize), null)
+            } catch (ex: FileNotFoundException) {
+              null
+            }
+
+            val outputArgs: List<Any?>
+            if (bitmap == null) {
+              outputArgs = listOf<Any?>(it.toString(), null)
+            } else {
+              val stream = ByteArrayOutputStream()
+              bitmap.compress(Bitmap.CompressFormat.JPEG, 95, stream)
+              val byteArray = stream.toByteArray()
+              val width = bitmap.width
+              val height = bitmap.height
+              bitmap.recycle()
+              outputArgs = listOf<Any?>(it.toString(), byteArray, width, height)
+            }
+            withContext(Dispatchers.Main) {
+              channel.invokeMethod("receiveAlbumArt", outputArgs)
+            }
+          }
+        }
+        result.success(null)
+      }
     } else {
       result.notImplemented()
     }
@@ -192,6 +237,22 @@ class AndroidMusicStorePlugin: FlutterPlugin, MethodCallHandler {
 
   override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
     channel.setMethodCallHandler(null)
-    context = null
+    applicationContext = null
+  }
+
+  override fun onAttachedToActivity(binding: ActivityPluginBinding) {
+    lifecycle = FlutterLifecycleAdapter.getActivityLifecycle(binding)
+  }
+
+  override fun onDetachedFromActivityForConfigChanges() {
+    lifecycle = null
+  }
+
+  override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {
+    lifecycle = FlutterLifecycleAdapter.getActivityLifecycle(binding)
+  }
+
+  override fun onDetachedFromActivity() {
+    lifecycle = null
   }
 }

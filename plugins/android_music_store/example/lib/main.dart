@@ -1,3 +1,4 @@
+import 'package:android_music_store/album_art_store.dart';
 import 'package:android_music_store/data_models.dart';
 import 'package:flutter/material.dart';
 import 'dart:async';
@@ -18,6 +19,7 @@ class MyApp extends StatefulWidget {
 
 class _MyAppState extends State<MyApp> {
   List<AlbumSummary> _albums = [];
+  AlbumArtStore? _albumArts;
   final _androidMusicStorePlugin = AndroidMusicStore();
 
   @override
@@ -38,6 +40,20 @@ class _MyAppState extends State<MyApp> {
       print("failed to get albums");
       return;
     }
+
+    _androidMusicStorePlugin.registerNewAlbumArtNotifier(
+      (newArt) => setState(
+        () {
+          _albumArts = newArt;
+        },
+      ),
+    );
+    _androidMusicStorePlugin.requestArtsForAlbums(
+      250,
+      albums.map(
+        (e) => e.id,
+      ),
+    );
 
     // If the widget was removed from the tree while the asynchronous platform
     // message was in flight, we want to discard the reply rather than calling
@@ -84,6 +100,7 @@ class _MyAppState extends State<MyApp> {
               return ListTile(
                 title: Text(album.title),
                 subtitle: Text("${album.mainArtist}, ${album.numberOfSongs} tracks"),
+                leading: _albumArts?.getImage("${album.id}", width: 70, height: 70),
                 trailing: const Icon(Icons.chevron_right),
                 onTap: () {
                   Navigator.push(
