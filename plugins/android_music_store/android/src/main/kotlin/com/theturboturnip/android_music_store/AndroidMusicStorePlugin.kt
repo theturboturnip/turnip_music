@@ -41,16 +41,24 @@ class AndroidMusicStorePlugin: FlutterPlugin, MethodCallHandler {
         MediaStore.Audio.Albums.EXTERNAL_CONTENT_URI
       }
 
+      val projection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+          arrayOf(
+            MediaStore.Audio.Albums._ID,
+            MediaStore.Audio.Albums.ALBUM,
+            MediaStore.Audio.Albums.NUMBER_OF_SONGS,
+            MediaStore.Audio.Albums.ARTIST,
+            MediaStore.Audio.Albums.ARTIST_ID,
+          )
+      } else {
+        arrayOf(
+          MediaStore.Audio.Albums._ID,
+          MediaStore.Audio.Albums.ALBUM,
+          MediaStore.Audio.Albums.NUMBER_OF_SONGS,
+          MediaStore.Audio.Albums.ARTIST,
+        )
+      }
 
-      val projection = arrayOf(
-        MediaStore.Audio.Albums._ID,
-        MediaStore.Audio.Albums.ALBUM,
-        MediaStore.Audio.Albums.NUMBER_OF_SONGS,
-        MediaStore.Audio.Albums.ARTIST,
-        MediaStore.Audio.Albums.ARTIST_ID,
-      )
-
-      val query = context?.contentResolver?.query(
+        val query = context?.contentResolver?.query(
         collection,
         projection,
         null,
@@ -71,9 +79,9 @@ class AndroidMusicStorePlugin: FlutterPlugin, MethodCallHandler {
         val artistColumn = cursor.getColumnIndexOrThrow(
           MediaStore.Audio.Albums.ARTIST
         )
-        val artistIdColumn = cursor.getColumnIndexOrThrow(
+        val artistIdColumn = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) cursor.getColumnIndexOrThrow(
           MediaStore.Audio.Albums.ARTIST_ID
-        )
+        ) else null;
 
         while (cursor.moveToNext()) {
           // Get values of columns for a given video.
@@ -81,7 +89,7 @@ class AndroidMusicStorePlugin: FlutterPlugin, MethodCallHandler {
           val album = cursor.getString(albumColumn)
           val numberOfSongs = cursor.getLong(numberOfSongsColumn)
           val artist = cursor.getString(artistColumn)
-          val artistId = cursor.getLong(artistIdColumn)
+          val artistId = if (artistIdColumn == null) -1 else cursor.getLong(artistIdColumn)
 
           // Stores column values and the contentUri in a local object
           // that represents the media file.
