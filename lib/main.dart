@@ -2,12 +2,14 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:path/path.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:turnip_music/library/data/db.dart';
 import 'package:turnip_music/library/library.dart';
+import 'package:turnip_music/nav.dart';
 import 'package:turnip_music/repos/db/db_repo.dart';
 import 'package:turnip_music/repos/db/db_user.dart';
 
@@ -61,37 +63,32 @@ Future<void> main() async {
 
   final dbRepo = await DbRepo.createDatabase(dbPath, dbUsers);
 
-  runApp(const MyApp());
+  runApp(MyApp(dbRepo: dbRepo));
 }
 
 class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+  const MyApp({super.key, required this.dbRepo});
+
+  final DbRepo dbRepo;
 
   // This widget is the root of your application.
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Flutter Demo',
-      theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // TRY THIS: Try running your application with "flutter run". You'll see
-        // the application has a purple toolbar. Then, without quitting the app,
-        // try changing the seedColor in the colorScheme below to Colors.green
-        // and then invoke "hot reload" (save your changes or press the "hot
-        // reload" button in a Flutter-supported IDE, or press "r" if you used
-        // the command line to start the app).
-        //
-        // Notice that the counter didn't reset back to zero; the application
-        // state is not lost during the reload. To reset the state, use hot
-        // restart instead.
-        //
-        // This works for code too, not just values: Most code changes can be
-        // tested with just a hot reload.
-        colorScheme: ColorScheme.fromSeed(seedColor: (kDebugMode) ? Colors.red : Colors.green),
-        useMaterial3: true,
+    return RepositoryProvider(
+      create: (context) => dbRepo,
+      // child: MultiBlocProvider(
+      //   providers: [
+      //     // TODO
+      //   ],
+      child: MaterialApp.router(
+        title: 'Turnip Music',
+        theme: ThemeData(
+          colorScheme: ColorScheme.fromSeed(seedColor: (kDebugMode) ? Colors.red : Colors.green),
+          useMaterial3: true,
+        ),
+        routerConfig: router,
       ),
-      home: const MyHomePage(title: 'Flutter Demo Home Page'),
+      // ),
     );
   }
 }

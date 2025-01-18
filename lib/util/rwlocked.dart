@@ -20,10 +20,15 @@ class RwLocked<T> {
   T _item;
   final ReadWriteMutex _mutex;
 
+  // Wait to take a read-lock and call the callback once inside.
+  // May run concurrently to other use() invocations, but will never run concurrently with swap().
   Future<TReturn> use<TReturn>(Future<TReturn> Function(T) callback) {
     return _mutex.protectRead(() => callback(_item));
   }
 
+  // Wait to take a write-lock, call consumeAndReplace() with the item once inside,
+  // and replace the item with the value returned by consumeAndReplace.
+  // Will never run concurrently with other swap() invocations or any use() invocation.
   Future<void> swap(Future<T> Function(T) consumeAndReplace) {
     return _mutex.protectWrite(() async {
       _item = await consumeAndReplace(_item);
