@@ -30,10 +30,25 @@ android {
     }
 
     buildTypes {
+        debug {
+            applicationIdSuffix = ".debug"
+            debuggable = true
+            manifestPlaceholders = [
+                appIcon: "@mipmap/ic_launcher_dbg",
+                appLabel: "Turnip Music DBG",
+                appTheme: "@style/LaunchThemeDbg",
+            ]
+        }
         release {
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.debug
+
+            manifestPlaceholders = [
+                appIcon: "@mipmap/ic_launcher",
+                appLabel: "Turnip Music",
+                appTheme: "@style/LaunchTheme",
+            ]
         }
     }
 }

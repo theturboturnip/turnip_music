@@ -9,3 +9,6 @@ generate:
 
 dbg_android:
     flutter run -d RZ8
+
+rel_android:
+    flutter run -d RZ8 --release
