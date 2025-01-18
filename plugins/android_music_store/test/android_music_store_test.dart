@@ -1,15 +1,22 @@
+import 'package:android_music_store/data_models.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:android_music_store/android_music_store.dart';
 import 'package:android_music_store/android_music_store_platform_interface.dart';
 import 'package:android_music_store/android_music_store_method_channel.dart';
 import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 
-class MockAndroidMusicStorePlatform
-    with MockPlatformInterfaceMixin
-    implements AndroidMusicStorePlatform {
+class MockAndroidMusicStorePlatform with MockPlatformInterfaceMixin implements AndroidMusicStorePlatform {
+  @override
+  Future<List<AlbumSummary>?> listAllAlbums() {
+    // TODO: implement listAllAlbums
+    throw UnimplementedError();
+  }
 
   @override
-  Future<String?> getPlatformVersion() => Future.value('42');
+  Future<List<Song>?> listSongsInAlbum(int? albumId) {
+    // TODO: implement listSongsInAlbum
+    throw UnimplementedError();
+  }
 }
 
 void main() {
@@ -19,11 +26,12 @@ void main() {
     expect(initialPlatform, isInstanceOf<MethodChannelAndroidMusicStore>());
   });
 
-  test('getPlatformVersion', () async {
-    AndroidMusicStore androidMusicStorePlugin = AndroidMusicStore();
-    MockAndroidMusicStorePlatform fakePlatform = MockAndroidMusicStorePlatform();
-    AndroidMusicStorePlatform.instance = fakePlatform;
+  // TODO tests
+  // test('getPlatformVersion', () async {
+  //   AndroidMusicStore androidMusicStorePlugin = AndroidMusicStore();
+  //   MockAndroidMusicStorePlatform fakePlatform = MockAndroidMusicStorePlatform();
+  //   AndroidMusicStorePlatform.instance = fakePlatform;
 
-    expect(await androidMusicStorePlugin.getPlatformVersion(), '42');
-  });
+  //   expect(await androidMusicStorePlugin.getPlatformVersion(), '42');
+  // });
 }

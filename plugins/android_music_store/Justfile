@@ -1,0 +1,8 @@
+set windows-shell := ["powershell.exe", "-NoLogo", "-Command"]
+
+default:
+    @just --list
+
+generate:
+    @echo "HEADS UP YOU ARE RUNNING THIS IN THE PLUGIN"
+    dart run build_runner build

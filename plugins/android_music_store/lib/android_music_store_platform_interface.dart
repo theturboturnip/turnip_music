@@ -1,3 +1,4 @@
+import 'package:android_music_store/data_models.dart';
 import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 
 import 'android_music_store_method_channel.dart';
@@ -23,7 +24,25 @@ abstract class AndroidMusicStorePlatform extends PlatformInterface {
     _instance = instance;
   }
 
-  Future<String?> getPlatformVersion() {
-    throw UnimplementedError('platformVersion() has not been implemented.');
-  }
+  // // TODO figure this out so I can get album thumbnails
+  // void setAlbumThumbnailReceiver(void Function(Uint8List bytesAsPng) receiver, {bool Function(String id)? filterAlbumId});
+
+  // /// Call getVersion() on the MediaStore.Audio to see if metadata needs to be synced.
+  // /// [See Android documentation for more info.](https://developer.android.com/training/data-storage/shared/media#check-for-updates)
+  // Future<String?> getMediaStoreVersion();
+
+  // /// Call MediaStore.getExternalVolumeNames() to find all the external volumes that may have audio data
+  // /// that may have changed
+  // Future<List<String>?> getVolumes();
+
+  // /// Call MediaStore.getGeneration(volumeName) for each volume name,
+  // /// which can be used to detect which volumes should be rescanned
+  // /// as laid out [in Android documentation](https://developer.android.com/reference/android/provider/MediaStore#getGeneration(android.content.Context,%20java.lang.String))
+  // Future<String?> getVolumesGenerations(List<String> volumeNames);
+
+  /// Get a list of all albums
+  Future<List<AlbumSummary>?> listAllAlbums();
+
+  /// Get an ordered list of songs in an album, or a list of the songs not attached to any album
+  Future<List<Song>?> listSongsInAlbum(int? albumId);
 }
