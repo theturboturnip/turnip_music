@@ -6,6 +6,7 @@ class Album {
   final String? musicBrainzId;
   final String name;
   // TODO releaseType
+  // TODO blob of bytes for album art
 
   Album({
     required this.musicBrainzId,
@@ -16,7 +17,10 @@ class Album {
 extension type AlbumBackingId(int id) {}
 
 /// Information about a given Album's presence on a specific Backend.
-/// An album may be present on any backend multiple times, but it's usually unlikely.
+/// An album may be present on any backend multiple times.
+/// For example, if someone has set up a separate backend-album for each disc of a overall-album.
+/// Crucially this means an association with an AlbumBacking DOES NOT MEAN THAT BACKEND'S ALBUM
+/// HAS A ONE-FOR-ONE MAPPING OF BACKEND-SONG TO REAL-SONG.
 class AlbumBacking {
   final AlbumId albumId;
   final String backendId;

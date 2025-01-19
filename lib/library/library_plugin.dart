@@ -6,4 +6,7 @@ abstract class LibraryPlugin extends DbUser {
   String get userVisibleName;
   // The backendId used by all datas managed by this plugin
   String get dataBackendId;
+
+  // Build a widget which will get put into the import plugin dialog
+  Widget buildSelectSongSetsToImportWidget(BuildContext context);
 }

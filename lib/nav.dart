@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/widgets.dart';
 import 'package:go_router/go_router.dart';
-import 'package:turnip_music/library/pages.dart';
+import 'package:turnip_music/library/importing.dart';
+import 'package:turnip_music/library/pages/library.dart';
+import 'package:turnip_music/library/pages/library_import.dart';
+import 'package:turnip_music/library/pages/library_import_finalize.dart';
+import 'package:turnip_music/permissions_page.dart';
 import 'package:turnip_music/util/empty_page.dart';
 
 final GlobalKey<NavigatorState> _rootNavigatorKey = GlobalKey<NavigatorState>(debugLabel: 'root');
@@ -41,8 +44,12 @@ enum NavBarRoute {
 
 final router = GoRouter(
   navigatorKey: _rootNavigatorKey,
-  initialLocation: NavBarRoute.library.route,
+  initialLocation: "/permissions",
   routes: [
+    GoRoute(
+      path: "/permissions",
+      builder: (context, state) => PermissionsPage(),
+    ),
     StatefulShellRoute.indexedStack(
       builder: (context, state, navigationShell) {
         return Scaffold(
@@ -70,10 +77,14 @@ final router = GoRouter(
               path: NavBarRoute.library.route,
               builder: (context, state) => const LibraryPage(),
               routes: [
-                GoRoute(
-                  path: "import",
-                  builder: (context, state) => const LibraryImportPage(),
-                ),
+                GoRoute(path: "import", builder: (context, state) => const LibraryImportPage(), routes: [
+                  GoRoute(
+                    path: "finalize",
+                    builder: (context, state) => LibraryImportFinalizePage(
+                      state.extra as List<BackendSetOfSongsToImport>,
+                    ),
+                  )
+                ]),
               ],
             ),
           ],
