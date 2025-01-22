@@ -145,27 +145,27 @@ class LibraryImportPage extends StatelessWidget {
       ),
       body: BlocProvider(
         create: (context) => LibraryImportBloc(context.read<PluginRepo>()),
-        child: Padding(
-          padding: EdgeInsets.all(16),
-          child: BlocBuilder<LibraryImportBloc, LibraryImportState>(
-            builder: (context, state) {
-              return Column(
-                mainAxisSize: MainAxisSize.max,
-                children: [
-                  _buildImporterSelector(context, state),
-                  Expanded(child: state.importer?.buildSelectSongSetsToImportWidget(context) ?? EmptyPage()),
-                  FilledButton(
-                    onPressed: state.songSetsToImport.isEmpty
-                        ? null
-                        : () {
-                            context.go("/library/import/finalize", extra: state.songSetsToImport);
-                          },
-                    child: const Text("Select Songs"),
-                  )
-                ],
-              );
-            },
-          ),
+        child: BlocBuilder<LibraryImportBloc, LibraryImportState>(
+          builder: (context, state) {
+            return Column(
+              mainAxisSize: MainAxisSize.max,
+              children: [
+                Padding(
+                  padding: EdgeInsets.all(16),
+                  child: _buildImporterSelector(context, state),
+                ),
+                Expanded(child: state.importer?.buildSelectSongSetsToImportWidget(context) ?? EmptyPage()),
+                FilledButton(
+                  onPressed: state.songSetsToImport.isEmpty
+                      ? null
+                      : () {
+                          context.go("/library/import/finalize", extra: state.songSetsToImport);
+                        },
+                  child: const Text("Select Songs"),
+                )
+              ],
+            );
+          },
         ),
       ),
     );

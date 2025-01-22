@@ -1,3 +1,4 @@
+import 'package:android_music_store/album_art_store.dart' as amsalbum;
 import 'package:android_music_store/android_music_store.dart';
 import 'package:android_music_store/data_models.dart' as amsdata;
 import 'package:bloc_concurrency/bloc_concurrency.dart';
@@ -16,12 +17,13 @@ class AndroidMediaStoreSelectorState {
   final int? selectedAlbumId;
   final List<amsdata.Song>? songsInAlbum;
 
-  // TODO album art?
+  final amsalbum.AlbumArtStore albumArt;
 
   AndroidMediaStoreSelectorState({
     required this.albums,
     required this.selectedAlbumId,
     required this.songsInAlbum,
+    required this.albumArt,
   });
 
   List<BackendSetOfSongsToImport> getSongsToImport() {
@@ -71,9 +73,15 @@ class AndroidMediaStoreSelectorEvent {}
 class AndroidMediaStoreStartLoadingAlbums extends AndroidMediaStoreSelectorEvent {}
 
 class AndroidMediaStoreSelectAlbumEvent extends AndroidMediaStoreSelectorEvent {
-  final int selectedAlbumId;
+  final int? selectedAlbumId;
 
   AndroidMediaStoreSelectAlbumEvent({required this.selectedAlbumId});
+}
+
+class AndroidMediaStoreUpdateAlbumArtEvent extends AndroidMediaStoreSelectorEvent {
+  final amsalbum.AlbumArtStore newArt;
+
+  AndroidMediaStoreUpdateAlbumArtEvent({required this.newArt});
 }
 
 class AndroidMediaStoreSelectorBloc extends Bloc<AndroidMediaStoreSelectorEvent, AndroidMediaStoreSelectorState> {
@@ -83,6 +91,7 @@ class AndroidMediaStoreSelectorBloc extends Bloc<AndroidMediaStoreSelectorEvent,
             albums: null,
             selectedAlbumId: null,
             songsInAlbum: null,
+            albumArt: amsalbum.AlbumArtStore(),
           ),
         ) {
     on<AndroidMediaStoreStartLoadingAlbums>((event, emit) async {
@@ -91,6 +100,7 @@ class AndroidMediaStoreSelectorBloc extends Bloc<AndroidMediaStoreSelectorEvent,
         // TODO sorting albums
         albums = await AndroidMusicStore().listAllAlbums();
       }
+      AndroidMusicStore().requestArtsForAlbums(500 /* TODO */, albums.map((a) => a.id));
       albums.sort((a, b) => a.title.compareTo(b.title));
       // TODO exclude album IDs already logged in the backend?
       //  - ah, but the album may only be partially loaded? so we should mark the albums as either
@@ -99,27 +109,54 @@ class AndroidMediaStoreSelectorBloc extends Bloc<AndroidMediaStoreSelectorEvent,
         albums: albums,
         selectedAlbumId: null,
         songsInAlbum: null,
+        albumArt: state.albumArt,
       ));
     });
     on<AndroidMediaStoreSelectAlbumEvent>(
       (event, emit) async {
-        final songs = await AndroidMusicStore().listSongsInAlbum(event.selectedAlbumId);
+        late final List<amsdata.Song>? songs;
+        if (event.selectedAlbumId != null) {
+          songs = await AndroidMusicStore().listSongsInAlbum(event.selectedAlbumId);
+        } else {
+          songs = null;
+        }
         emit(
           AndroidMediaStoreSelectorState(
             albums: state.albums,
             selectedAlbumId: event.selectedAlbumId,
             songsInAlbum: songs,
+            albumArt: state.albumArt,
           ),
         );
       },
       transformer: sequential(),
     );
+    on<AndroidMediaStoreUpdateAlbumArtEvent>(
+      (event, emit) async {
+        emit(
+          AndroidMediaStoreSelectorState(
+            albums: state.albums,
+            selectedAlbumId: state.selectedAlbumId,
+            songsInAlbum: state.songsInAlbum,
+            albumArt: event.newArt,
+          ),
+        );
+      },
+    );
+    AndroidMusicStore().registerNewAlbumArtNotifier(
+      (newArt) => add(
+        AndroidMediaStoreUpdateAlbumArtEvent(
+          newArt: newArt,
+        ),
+      ),
+    );
   }
-  // context.read<LibraryImportBloc>().add(
-  //               LibrarySelectSongsToImportEvent(
-  //                 songGroupToImport: value,
-  //               ),
-  //             );
+
+  @override
+  Future<void> close() {
+    AndroidMusicStore().registerNewAlbumArtNotifier(null);
+    return super.close();
+  }
 }
 
 class AndroidMediaStoreLibraryPlugin extends LibraryPlugin {
@@ -145,35 +182,82 @@ class AndroidMediaStoreLibraryPlugin extends LibraryPlugin {
     }
   }
 
-  Widget? _makeGridView(List<amsdata.AlbumSummary>? albums, int? selectedAlbumId) {
+  Widget? _makeGridView(amsalbum.AlbumArtStore albumArt, List<amsdata.AlbumSummary>? albums, int? selectedAlbumId) {
     if (albums == null) {
       return null;
     }
     return GridView.builder(
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 2,
+        crossAxisCount: 3,
+        childAspectRatio: 0.66,
       ),
       itemCount: albums.length,
       itemBuilder: (context, index) {
-        return Card(
-          elevation: (albums[index].id == selectedAlbumId) ? 5.0 : 1.0,
-          child: InkWell(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(albums[index].title),
-                Text(albums[index].mainArtist),
-              ],
-            ),
-            onTap: () {
-              context.read<AndroidMediaStoreSelectorBloc>().add(
-                    AndroidMediaStoreSelectAlbumEvent(
-                      selectedAlbumId: albums[index].id,
+        final album = albums[index];
+        return /*Card(
+          elevation: (album.id == selectedAlbumId) ? 5.0 : 1.0,
+          child: */
+            InkWell(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              AspectRatio(
+                aspectRatio: 1,
+                child: albumArt.getImage(
+                  album.id.toString(),
+                ),
+              ),
+              Padding(
+                padding: EdgeInsets.only(left: 4, right: 4, bottom: 4),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.max,
+                        children: [
+                          Text(
+                            album.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          Text(
+                            album.mainArtist,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ),
                     ),
-                  );
-            },
+                    SizedBox(
+                      width: 16,
+                      child: Center(
+                        child: Radio<int>(
+                          value: album.id,
+                          groupValue: selectedAlbumId,
+                          onChanged: (selected) {
+                            context.read<AndroidMediaStoreSelectorBloc>().add(
+                                  AndroidMediaStoreSelectAlbumEvent(
+                                    selectedAlbumId: selected,
+                                  ),
+                                );
+                          },
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
+          onTap: () {
+            context.read<AndroidMediaStoreSelectorBloc>().add(
+                  AndroidMediaStoreSelectAlbumEvent(
+                    selectedAlbumId: albums[index].id,
+                  ),
+                );
+          },
         );
       },
     );
@@ -191,7 +275,7 @@ class AndroidMediaStoreLibraryPlugin extends LibraryPlugin {
                   songSetsToImport: songsToImport,
                 ),
               );
-          return _makeGridView(state.albums, state.selectedAlbumId) ?? Center(child: CircularProgressIndicator());
+          return _makeGridView(state.albumArt, state.albums, state.selectedAlbumId) ?? Center(child: CircularProgressIndicator());
         },
       ),
     );
