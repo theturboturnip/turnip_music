@@ -97,7 +97,6 @@ class AndroidMediaStoreSelectorBloc extends Bloc<AndroidMediaStoreSelectorEvent,
     on<AndroidMediaStoreStartLoadingAlbums>((event, emit) async {
       List<amsdata.AlbumSummary>? albums;
       while (albums == null) {
-        // TODO sorting albums
         albums = await AndroidMusicStore().listAllAlbums();
       }
       AndroidMusicStore().requestArtsForAlbums(500 /* TODO */, albums.map((a) => a.id));

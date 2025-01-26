@@ -9,7 +9,7 @@ part of 'data.dart';
 MusicbrainzReleaseSearchResultMedia
     _$MusicbrainzReleaseSearchResultMediaFromJson(Map<String, dynamic> json) =>
         MusicbrainzReleaseSearchResultMedia(
-          format: json['format'] as String,
+          format: json['format'] as String?,
           discCount: (json['disc-count'] as num).toInt(),
           trackCount: (json['track-count'] as num).toInt(),
         );
@@ -28,6 +28,8 @@ MusizbrainzReleaseSearchResult _$MusizbrainzReleaseSearchResultFromJson(
       id: json['id'] as String,
       score: (json['score'] as num).toInt(),
       title: json['title'] as String,
+      disambiguation: json['disambiguation'] as String?,
+      country: json['country'] as String?,
       trackCount: (json['track-count'] as num).toInt(),
       mediaCount: (json['count'] as num).toInt(),
       media: (json['media'] as List<dynamic>)
@@ -42,6 +44,8 @@ Map<String, dynamic> _$MusizbrainzReleaseSearchResultToJson(
       'id': instance.id,
       'score': instance.score,
       'title': instance.title,
+      'disambiguation': instance.disambiguation,
+      'country': instance.country,
       'track-count': instance.trackCount,
       'count': instance.mediaCount,
       'media': instance.media,

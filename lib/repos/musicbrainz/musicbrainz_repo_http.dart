@@ -86,7 +86,12 @@ class MusicbrainzHttpRepo extends MusicbrainzRepo {
     final cached = inMemoryLookupCache[lookup];
     if (cached == null) {
       final response = await _makeRequest(lookup);
-      result = MusicbrainzReleaseLookupResult.fromJson(json.decode(response));
+      try {
+        result = MusicbrainzReleaseLookupResult.fromJson(json.decode(response));
+      } catch (err) {
+        print("Error decoding $response");
+        rethrow;
+      }
       inMemoryLookupCache[lookup] = result;
       _capCacheAtNEntries(inMemoryLookupCache);
     } else {
@@ -102,7 +107,12 @@ class MusicbrainzHttpRepo extends MusicbrainzRepo {
     final cached = inMemorySearchCache[search];
     if (cached == null) {
       final response = await _makeRequest(search);
-      result = MusizbrainzReleaseSearchResults.fromJson(json.decode(response));
+      try {
+        result = MusizbrainzReleaseSearchResults.fromJson(json.decode(response));
+      } catch (err) {
+        print("Error decoding $response");
+        rethrow;
+      }
       inMemorySearchCache[search] = result;
       _capCacheAtNEntries(inMemorySearchCache);
     } else {

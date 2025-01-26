@@ -1,85 +1,283 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:turnip_music/library/importing.dart';
+import 'package:turnip_music/repos/musicbrainz/data.dart';
+import 'package:turnip_music/repos/musicbrainz/musicbrainz_repo.dart';
+import 'package:turnip_music/util/custom_expansion_tile.dart';
+
+final class LibraryImportFinalizeSet extends StatefulWidget {
+  const LibraryImportFinalizeSet({super.key, required this.toImport});
+
+  final ImportPlanBackendSongSet toImport;
+
+  @override
+  State<StatefulWidget> createState() => LibraryImportFinalizeSetState();
+}
+
+final class LibraryImportFinalizeSetState extends State<LibraryImportFinalizeSet> {
+  late final TextEditingController nameControl;
+  late ImportPlanBackendSongSet toImport;
+  bool searching = false;
+  MusizbrainzReleaseSearchResults? releaseSearch;
+  String? releaseSearchErrorMessage;
+
+  @override
+  void initState() {
+    super.initState();
+    toImport = widget.toImport;
+    nameControl = TextEditingController(text: widget.toImport.finalName);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    Iterable<Widget> widgets;
+    switch (toImport) {
+      case ImportPlanBackendSongSetAsAlbum album:
+        widgets = [
+          FilledButton(
+            onPressed: () {
+              setState(() {
+                searching = true;
+                releaseSearch = null;
+                releaseSearchErrorMessage = null;
+              });
+              final search = MusicbrainzReleaseSearch(
+                nameParts: album.finalName.split(" "),
+                nTracks: null, //album.songs.length, // TODO need to clean up albums with dupe tracks
+              );
+              print("doing a search ${search.toUri()}");
+              context
+                  .read<MusicbrainzRepo>()
+                  .searchReleases(
+                    search,
+                  )
+                  .then(
+                    (search) => setState(
+                      () {
+                        searching = false;
+                        releaseSearch = search;
+                        releaseSearchErrorMessage = null;
+                      },
+                    ),
+                    onError: (error, stack) => setState(
+                      () {
+                        print(error);
+                        print(stack);
+                        searching = false;
+                        releaseSearch = null;
+                        releaseSearchErrorMessage = "$error";
+                      },
+                    ),
+                  );
+            },
+            child: const Text("Search MusicBrainz"),
+          ),
+          if (searching) LinearProgressIndicator(),
+          if (releaseSearch != null && releaseSearch!.releases.isNotEmpty != true) const Text("No search results!"),
+          if (releaseSearch != null)
+            ...releaseSearch!.releases.map(
+              (release) {
+                // Use the cover-art-archive https://musicbrainz.org/doc/Cover_Art_Archive/API to get the image.
+                // This does not have any rate limiting currently https://musicbrainz.org/doc/Cover_Art_Archive/API#Rate_limiting_rules
+                Widget leading = Image.network(
+                  "https://coverartarchive.org/release/${release.id}/front",
+                  // otherwise empty box TODO icon?
+                  errorBuilder: (context, error, stack) => SizedBox.square(
+                    dimension: 10,
+                  ),
+                );
+                String subtitle = "";
+                if (release.country == "XW") {
+                  subtitle = "Worldwide";
+                } else if (release.country != null) {
+                  List<int> countryAsAlphabet = release.country!.toLowerCase().codeUnits.map((unit) => unit - 0x61).toList();
+                  if (countryAsAlphabet.length == 2 && !countryAsAlphabet.any((unit) => (unit < 0) || (unit >= 26))) {
+                    // Encode the country code as an emoji by encoding as pair of REGIONAL INDICATOR SYMBOL.
+                    // The base for this is 0x1F1E6, add the character index in the alphabet to get the emoji
+                    // See https://apps.timwhitlock.info/unicode/inspect?s=%F0%9F%87%A6%F0%9F%87%A9ADad
+                    // See https://stackoverflow.com/a/42235254
+                    subtitle = String.fromCharCodes([0x1F1E6 + countryAsAlphabet[0], 0x1F1E6 + countryAsAlphabet[1], 0x20]);
+                  }
+                  subtitle += release.country!;
+                }
+                if (release.disambiguation != null) {
+                  subtitle += "${subtitle.isEmpty ? "" : ", "}${release.disambiguation}";
+                }
+                if (subtitle.isNotEmpty) {
+                  subtitle += "\n";
+                }
+                if (release.media.isNotEmpty && !release.media.any((m) => m.format != release.media.first.format)) {
+                  subtitle += "${release.media.length}x ${release.media.first.format ?? '??'}";
+                } else {
+                  subtitle += release.media.map((m) => m.format ?? '??').join("+");
+                }
+                subtitle += ", ${release.trackCount} total tracks";
+                return ListTile(
+                  leading: leading,
+                  title: Text(release.title),
+                  subtitle: Text(subtitle),
+                );
+              },
+            ),
+          if (releaseSearchErrorMessage != null) Text(releaseSearchErrorMessage!),
+        ];
+      case ImportPlanBackendSongSetAsTag tag:
+        widgets = [];
+      default:
+        widgets = [];
+    }
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Text("Importing ${toImport.finalName}"),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => Navigator.pop(context, toImport),
+        ),
+      ),
+      body: ListView(
+        children: [
+          // Button which moves from Album -> Tag but can't go back (not maintaining enough state :/)
+          SegmentedButton(
+            segments: [
+              ButtonSegment(
+                value: ImportPlanBackendSongSetAsTag,
+                icon: const Icon(Icons.sell),
+                label: const Text("as Tag"),
+              ), // tag
+              ButtonSegment(
+                value: ImportPlanBackendSongSetAsAlbum,
+                icon: const Icon(Icons.library_music),
+                label: const Text("as Album"),
+                enabled: toImport is! ImportPlanBackendSongSetAsTag,
+              ), // album
+            ],
+            selected: {toImport.runtimeType},
+            onSelectionChanged: (newTypeSet) {
+              final newType = newTypeSet.first;
+              switch (toImport) {
+                case ImportPlanBackendSongSetAsAlbum album:
+                  if (newType == ImportPlanBackendSongSetAsTag) {
+                    setState(() {
+                      toImport = ImportPlanBackendSongSetAsTag(
+                        backendName: album.backendName,
+                        tagName: album.newName,
+                        songs: album.songs
+                            .map(
+                              (albumSong) => ImportPlanBackendSong(
+                                backendId: albumSong.backendId,
+                                backendName: albumSong.backendName,
+                                preexistingSong: albumSong.preexistingSong,
+                                newName: albumSong.newName,
+                                newMusicbrainzId: albumSong.newMusicbrainzId,
+                              ),
+                            )
+                            .toList(),
+                      );
+                    });
+                  }
+                case ImportPlanBackendSongSetAsTag tag:
+                  if (newType == ImportPlanBackendSongSetAsAlbum) {
+                    print("nope, can't do that");
+                  }
+              }
+            },
+          ),
+          TextField(
+            controller: nameControl,
+            onChanged: (newName) => setState(() {
+              toImport = toImport.withNewName(newName);
+            }),
+          ),
+          ...widgets,
+        ],
+      ),
+    );
+  }
+}
 
 final class LibraryImportFinalizePage extends StatelessWidget {
-  const LibraryImportFinalizePage(this._toImport, {super.key});
+  const LibraryImportFinalizePage(this.plan, {super.key});
 
-  final List<BackendSetOfSongsToImport> _toImport;
+  final ImportPlan plan;
 
-  // Widget _buildNoAlbumFinalizer() {}
+  Widget _buildImportSetPlan(BuildContext context, int importSetIndex) {
+    final importSet = plan.importSets[importSetIndex];
 
-  Widget _buildImportSetPlan(ImportPlanBackendSongSet importSet) {
     String title;
     switch (importSet) {
       case ImportPlanBackendSongSetAsTag importAsTag:
-        title = "Import '${importAsTag.setName}' as tag '${importAsTag.tagName}'";
+        title = "Import '${importAsTag.backendName}' as tag '${importAsTag.tagName}'";
       case ImportPlanBackendSongSetAsAlbum importAsAlbum:
-        if (importAsAlbum.preexistingAlbumId == null) {
-          title = "Import album '${importAsAlbum.setName}'";
-          if (importAsAlbum.name != importAsAlbum.setName) {
-            title += " as '${importAsAlbum.name}'";
+        if (importAsAlbum.preexistingAlbum == null) {
+          title = "Import album '${importAsAlbum.backendName}'";
+          if (importAsAlbum.newName != importAsAlbum.backendName) {
+            title += " as '${importAsAlbum.newName}'";
           }
         } else {
-          title = "Link '${importAsAlbum.setName}' to album '${importAsAlbum.name}'";
+          title = "Link '${importAsAlbum.backendName}' to album '${importAsAlbum.preexistingAlbum!.$2.name}'";
         }
-        if (importAsAlbum.linkedFromMusicbrainzId != null) {
-          title += " with MusicBrainz metadata";
+        if (importAsAlbum.newMusicbrainzId != null) {
+          title += " with new MusicBrainz metadata";
+        } else if (importAsAlbum.preexistingAlbum?.$2.musicBrainzId != null) {
+          title += " with pre-existing MusicBrainz metadata";
         }
       default:
         throw "Invalid ImportPlanBackendSongSet type $importSet";
     }
-    return ExpansionTile(
+    return CustomExpansionTile(
       title: Text(title),
+      onTap: () async {
+        final newSet = await Navigator.of(context).push(
+          MaterialPageRoute<ImportPlanBackendSongSet>(
+            builder: (BuildContext context) => LibraryImportFinalizeSet(toImport: importSet),
+            fullscreenDialog: true,
+          ),
+        );
+        if (newSet != null) {
+          plan.importSets[importSetIndex] = newSet;
+        }
+      },
       children: importSet.songs.map((song) {
         Widget? leading;
-        if (song is ImportPlanBackendSongLinkedToAlbum) {
-          leading = Text(
-            "${song.discNumber}:${song.trackNumber}",
-          );
-        }
-
         String title;
-        if (song.preexistingSongId == null) {
+        List<String> subtitleInfo = [];
+        if (song.preexistingSong == null) {
           title = "Import '${song.backendName}'";
-          if (song.name != song.backendName) {
-            title += " as '${song.name}'";
+          if (song.newName != null && song.newName != song.backendName) {
+            title += " as '${song.newName}'";
           }
         } else {
-          title = "Link '${song.backendName}' to '${song.name}'";
+          title = "Link '${song.backendName}' to '${song.preexistingSong!.$2.name}'";
+          if (song.newName != null && song.newName != song.preexistingSong!.$2.name) {
+            title += " as '${song.newName}'";
+          }
         }
-        if (song.linkedFromMusicbrainzId != null) {
-          title += " with MusicBrainz metadata";
+        if (song.newMusicbrainzId != null) {
+          title += " with new MusicBrainz metadata";
+        } else if (song.preexistingSong?.$2.musicBrainzId != null) {
+          title += " with pre-existing MusicBrainz metadata";
+        }
+        if (song is ImportPlanBackendSongLinkedToAlbum) {
+          leading = Text(
+            "${song.finalDiscNumber}:${song.finalTrackNumber}",
+          );
+          if (song.preexistingSongToPreexistingAlbum != null) {
+            if ((song.finalDiscNumber, song.finalTrackNumber) != (song.preexistingSongToPreexistingAlbum!.disc, song.preexistingSongToPreexistingAlbum!.track)) {
+              subtitleInfo.add("previously ${song.preexistingSongToPreexistingAlbum!.disc}:${song.preexistingSongToPreexistingAlbum!.track} in database");
+            }
+          }
+          if ((song.finalDiscNumber, song.finalTrackNumber) != (song.backendDiscNumber, song.backendTrackNumber)) {
+            subtitleInfo.add("held as ${song.backendDiscNumber}:${song.backendTrackNumber} in backend");
+          }
         }
 
         return ListTile(
           leading: leading,
           title: Text(title),
+          subtitle: Text(subtitleInfo.join(", ")),
         );
       }).toList(),
-    );
-  }
-
-  Widget _buildFinalizer(List<BackendSetOfSongsToImport> toImport) {
-    final plan = generateImportPlan(toImport);
-
-    // final albums = toImport.albums.entries.whereType<MapEntry<String?, BackendSpecificAlbum>>().toList();
-    // if (toImport.songs.values.any((song) => song.album == null)) {
-    //   albums.add(
-    //     MapEntry(
-    //       null,
-    //       BackendSpecificAlbum(
-    //         name: "No Album",
-    //         suggestedMusicbrainzUuid: null,
-    //       ),
-    //     ),
-    //   );
-    // }
-    return ListView.builder(
-      itemCount: plan.importSets.length,
-      itemBuilder: (context, index) {
-        final importSet = plan.importSets[index];
-        return _buildImportSetPlan(importSet);
-      },
     );
   }
 
@@ -87,29 +285,16 @@ final class LibraryImportFinalizePage extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text("Importing ${_toImport.length} groups"),
+        title: Text("Importing ${plan.importSets.length} groups"),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
           onPressed: () => Navigator.pop(context),
         ),
       ),
-      body: _buildFinalizer(_toImport),
-      // BlocProvider(
-      //   create: (context) => LibraryImportBloc(context.read<PluginRepo>()),
-      //   child: Padding(
-      //     padding: EdgeInsets.all(16),
-      //     child: BlocBuilder<LibraryImportBloc, LibraryImportState>(
-      //       builder: (context, state) {
-      //         return Column(
-      //           mainAxisSize: MainAxisSize.max,
-      //           children: [
-      //             _buildImporterSelector(context, state),
-      //           ],
-      //         );
-      //       },
-      //     ),
-      //   ),
-      // ),
+      body: ListView.builder(
+        itemCount: plan.importSets.length,
+        itemBuilder: _buildImportSetPlan,
+      ),
     );
   }
 }

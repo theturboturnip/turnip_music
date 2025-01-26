@@ -11,6 +11,8 @@ import 'package:turnip_music/library/library.dart';
 import 'package:turnip_music/nav.dart';
 import 'package:turnip_music/permissions_page.dart';
 import 'package:turnip_music/repos/db/db_repo.dart';
+import 'package:turnip_music/repos/musicbrainz/musicbrainz_repo.dart';
+import 'package:turnip_music/repos/musicbrainz/musicbrainz_repo_http.dart';
 import 'package:turnip_music/repos/plugin_repo.dart';
 
 Future<void> main() async {
@@ -80,12 +82,11 @@ class MyApp extends StatelessWidget {
     }
     return MultiRepositoryProvider(
       providers: [
-        RepositoryProvider(
-          create: (context) => dbRepo,
-        ),
-        RepositoryProvider(
-          create: (context) => pluginRepo,
-        ),
+        RepositoryProvider.value(value: dbRepo),
+        RepositoryProvider.value(value: pluginRepo),
+        RepositoryProvider<MusicbrainzRepo>(
+          create: (context) => MusicbrainzHttpRepo(),
+        )
       ],
       // child: MultiBlocProvider(
       //   providers: [

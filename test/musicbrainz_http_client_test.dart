@@ -20,7 +20,7 @@ void main() {
           nRequests,
           (index) => MusicbrainzReleaseSearch(
             nameParts: ["small-$index"],
-            atLeastNTracks: 5,
+            nTracks: 5,
           ),
         );
 
@@ -51,7 +51,7 @@ void main() {
     fakeAsync((async) {
       final repo = MusicbrainzHttpRepo(client: MockHttpClient());
 
-      final search = MusicbrainzReleaseSearch(nameParts: ["Final Fantasy XV"], atLeastNTracks: null);
+      final search = MusicbrainzReleaseSearch(nameParts: ["Final Fantasy XV"], nTracks: null);
       expect(
         search.toUri(),
         Uri.tryParse("http://musicbrainz.org/ws/2/release?fmt=json&query=%28release%3A%22Final+Fantasy+XV%22%29"),

@@ -22,21 +22,25 @@ String luceneEscape(String text) {
 // See https://musicbrainz.org/doc/MusicBrainz_API/Search#Release
 final class MusicbrainzReleaseSearch extends MusicbrainzRequest {
   final List<String> nameParts;
-  final int? atLeastNTracks;
+  final int? nTracks;
   final int offset;
 
   MusicbrainzReleaseSearch({
     required this.nameParts,
-    required this.atLeastNTracks,
+    required this.nTracks,
     this.offset = 0,
   });
 
   @override
   Uri _toUri(String scheme, String host) {
     final formattedReleaseQuery = nameParts.map((namePart) => 'release:"${luceneEscape(namePart)}"').join(" AND ");
-    final nTracksQuery = (atLeastNTracks != null) ? "tracks:[$atLeastNTracks:1000]" : null;
+    // This just isn't reliable :/
+    final nTracksQuery = null; //  (nTracks != null) ? "tracks:$nTracks" : null;
 
     final toplevelQueryGroups = [formattedReleaseQuery, nTracksQuery].whereType<String>();
+
+    final query = toplevelQueryGroups.map((part) => "($part)").join(" AND ");
+    print(query);
 
     return Uri(
       scheme: scheme,
@@ -45,18 +49,19 @@ final class MusicbrainzReleaseSearch extends MusicbrainzRequest {
       queryParameters: {
         "fmt": "json",
         if (offset > 0) "offset": offset.toString(),
-        "query": toplevelQueryGroups.map((part) => "($part)").join(" AND "),
+        "query": query,
       },
     );
   }
 
   @override
-  List<Object?> get props => [nameParts, atLeastNTracks, offset];
+  List<Object?> get props => [nameParts, nTracks, offset];
 }
 
 @JsonSerializable()
 class MusicbrainzReleaseSearchResultMedia {
-  final String format;
+  // TODO under what circumstances can this be null??
+  final String? format;
   @JsonKey(name: "disc-count")
   // Unsure exactly what this means - can be zero or one, or maybe more?
   final int discCount;
@@ -82,6 +87,8 @@ class MusizbrainzReleaseSearchResult {
   final int score;
   // Title of the release
   final String title;
+  final String? disambiguation;
+  final String? country;
   // Total number of tracks in the release across all medias
   @JsonKey(name: "track-count")
   final int trackCount;
@@ -95,6 +102,8 @@ class MusizbrainzReleaseSearchResult {
     required this.id,
     required this.score,
     required this.title,
+    required this.disambiguation,
+    required this.country,
     required this.trackCount,
     required this.mediaCount,
     required this.media,

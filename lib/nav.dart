@@ -81,7 +81,7 @@ final router = GoRouter(
                   GoRoute(
                     path: "finalize",
                     builder: (context, state) => LibraryImportFinalizePage(
-                      state.extra as List<BackendSetOfSongsToImport>,
+                      state.extra as ImportPlan,
                     ),
                   )
                 ]),

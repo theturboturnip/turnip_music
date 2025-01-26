@@ -159,7 +159,7 @@ class LibraryImportPage extends StatelessWidget {
                   onPressed: state.songSetsToImport.isEmpty
                       ? null
                       : () {
-                          context.go("/library/import/finalize", extra: state.songSetsToImport);
+                          context.go("/library/import/finalize", extra: generateImportPlan(state.songSetsToImport));
                         },
                   child: const Text("Select Songs"),
                 )
