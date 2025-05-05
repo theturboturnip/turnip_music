@@ -5,6 +5,7 @@ import 'package:turnip_music/repos/musicbrainz/data.dart';
 import 'package:turnip_music/repos/musicbrainz/musicbrainz_repo.dart';
 import 'package:turnip_music/util/custom_expansion_tile.dart';
 
+/*
 final class LibraryImportFinalizeSet extends StatefulWidget {
   const LibraryImportFinalizeSet({super.key, required this.toImport});
 
@@ -169,7 +170,6 @@ final class LibraryImportFinalizeSetState extends State<LibraryImportFinalizeSet
                                 backendName: albumSong.backendName,
                                 preexistingSong: albumSong.preexistingSong,
                                 newName: albumSong.newName,
-                                newMusicbrainzId: albumSong.newMusicbrainzId,
                               ),
                             )
                             .toList(),
@@ -195,13 +195,15 @@ final class LibraryImportFinalizeSetState extends State<LibraryImportFinalizeSet
     );
   }
 }
+*/
 
 final class LibraryImportFinalizePage extends StatelessWidget {
-  const LibraryImportFinalizePage(this.plan, {super.key});
+  const LibraryImportFinalizePage(this.session, {super.key});
 
-  final ImportPlan plan;
+  final ImportSession session;
 
-  Widget _buildImportSetPlan(BuildContext context, int importSetIndex) {
+  /*
+  Widget _buildImportSetPlan(BuildContext context) {
     final importSet = plan.importSets[importSetIndex];
 
     String title;
@@ -217,27 +219,22 @@ final class LibraryImportFinalizePage extends StatelessWidget {
         } else {
           title = "Link '${importAsAlbum.backendName}' to album '${importAsAlbum.preexistingAlbum!.$2.name}'";
         }
-        if (importAsAlbum.newMusicbrainzId != null) {
-          title += " with new MusicBrainz metadata";
-        } else if (importAsAlbum.preexistingAlbum?.$2.musicBrainzId != null) {
-          title += " with pre-existing MusicBrainz metadata";
-        }
       default:
         throw "Invalid ImportPlanBackendSongSet type $importSet";
     }
     return CustomExpansionTile(
       title: Text(title),
-      onTap: () async {
-        final newSet = await Navigator.of(context).push(
-          MaterialPageRoute<ImportPlanBackendSongSet>(
-            builder: (BuildContext context) => LibraryImportFinalizeSet(toImport: importSet),
-            fullscreenDialog: true,
-          ),
-        );
-        if (newSet != null) {
-          plan.importSets[importSetIndex] = newSet;
-        }
-      },
+      // onTap: () async {
+      //   final newSet = await Navigator.of(context).push(
+      //     MaterialPageRoute<ImportPlanBackendSongSet>(
+      //       builder: (BuildContext context) => LibraryImportFinalizeSet(toImport: importSet),
+      //       fullscreenDialog: true,
+      //     ),
+      //   );
+      //   if (newSet != null) {
+      //     plan.importSets[importSetIndex] = newSet;
+      //   }
+      // },
       children: importSet.songs.map((song) {
         Widget? leading;
         String title;
@@ -252,11 +249,6 @@ final class LibraryImportFinalizePage extends StatelessWidget {
           if (song.newName != null && song.newName != song.preexistingSong!.$2.name) {
             title += " as '${song.newName}'";
           }
-        }
-        if (song.newMusicbrainzId != null) {
-          title += " with new MusicBrainz metadata";
-        } else if (song.preexistingSong?.$2.musicBrainzId != null) {
-          title += " with pre-existing MusicBrainz metadata";
         }
         if (song is ImportPlanBackendSongLinkedToAlbum) {
           leading = Text(
@@ -280,20 +272,84 @@ final class LibraryImportFinalizePage extends StatelessWidget {
       }).toList(),
     );
   }
+  */
 
   @override
   Widget build(BuildContext context) {
+    final actions = session.allActions.toList();
     return Scaffold(
       appBar: AppBar(
-        title: Text("Importing ${plan.importSets.length} groups"),
+        title: Text("Importing ${session.songActions.length} songs"),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
           onPressed: () => Navigator.pop(context),
         ),
       ),
       body: ListView.builder(
-        itemCount: plan.importSets.length,
-        itemBuilder: _buildImportSetPlan,
+        itemCount: actions.length,
+        itemBuilder: (context, idx) {
+          final action = actions[idx];
+          late String title;
+          switch (action) {
+            case ImportTagAction tag:
+              title = "Create/import tag '${tag.tagName}'";
+            case CreateNewArtist artist:
+              final backendName = artist.importedData.name;
+              final logicalName = artist.newName;
+              if (backendName != logicalName) {
+                title = "Create artist '$backendName' as '$logicalName'";
+              } else {
+                title = "Create artist '$backendName'";
+              }
+            case CreateNewAlbum album:
+              final backendName = album.importedData.name;
+              final logicalName = album.newName;
+              if (backendName != logicalName) {
+                title = "Create artist '$backendName' as '$logicalName'";
+              } else {
+                title = "Create artist '$backendName'";
+              }
+            case CreateNewSong song:
+              final backendName = song.importedData.name;
+              final logicalName = song.newName;
+              // TODO attach info about logical album and logical tag
+              if (backendName != logicalName) {
+                title = "Create song '$backendName' as '$logicalName'";
+              } else {
+                title = "Create song '$backendName'";
+              }
+            case ForcedLinkToExistingArtist artist:
+              final backendName = artist.importedData.name;
+              final logicalName = session.resolveArtistRefLogicalName(artist.existingArtist);
+              if (backendName != logicalName) {
+                title = "Link artist '$backendName' to '$logicalName'";
+              } else {
+                title = "Link artist '$backendName'";
+              }
+            case ForcedLinkToExistingAlbum album:
+              final backendName = album.importedData.name;
+              final logicalName = session.resolveAlbumRefLogicalName(album.existingAlbum);
+              if (backendName != logicalName) {
+                title = "Link album '$backendName' to '$logicalName'";
+              } else {
+                title = "Link album '$backendName'";
+              }
+            case ForcedLinkToExistingSong song:
+              final backendName = song.importedData.name;
+              final logicalName = session.resolveSongRefLogicalName(song.existingSong);
+              // TODO attach info about logical album and logical tag
+              if (backendName != logicalName) {
+                title = "Link song '$backendName' to '$logicalName'";
+              } else {
+                title = "Link song '$backendName'";
+              }
+            default:
+              title = "Unknown Action";
+          }
+          return CustomExpansionTile(
+            title: Text(title),
+          );
+        },
       ),
     );
   }

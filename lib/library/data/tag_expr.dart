@@ -61,7 +61,7 @@ class TagExprJoin extends TagExprNode {
   }
 }
 
-extension type UserTagExprId(int id) {}
+extension type UserTagExprId(int raw) {}
 
 /// User-defined tag which applies implicitly to songs that fulfil the criteria shown in the expression.
 class UserExprTag {

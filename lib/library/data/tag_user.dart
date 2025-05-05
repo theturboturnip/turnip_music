@@ -1,4 +1,4 @@
-extension type UserTagId(int id) {}
+extension type UserTagId(int raw) {}
 
 /// User-defined tag which can be applied directly to songs.
 class UserTag {

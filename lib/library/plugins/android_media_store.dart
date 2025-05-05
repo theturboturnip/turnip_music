@@ -5,11 +5,37 @@ import 'package:bloc_concurrency/bloc_concurrency.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:sqflite/sqflite.dart';
+import 'package:turnip_music/library/data/song.dart';
+import 'package:turnip_music/library/data/tag_album.dart';
+import 'package:turnip_music/library/data/tag_artist.dart';
 import 'package:turnip_music/library/importing.dart';
 import 'package:turnip_music/library/library_plugin.dart';
 import 'package:turnip_music/library/pages/library_import.dart';
+import 'package:turnip_music/repos/db/db_repo.dart';
 
 const androidMediaStoreBackendId = "ams";
+// const androidMediaStoreMetadataOrigin = "mp3";
+
+BackendAlbum amsBackendAlbum(amsdata.AlbumSummary album, List<amsdata.Song> songsInAlbum) {
+  return BackendAlbum(
+    logicalAlbumId: AlbumId.unspecified,
+    backend: androidMediaStoreBackendId,
+    stableId: null,
+    unstableId: album.id.toString(),
+    name: album.title,
+    firstArtist: album.mainArtist,
+    extra: null,
+    coverArt: null, // TODO
+    tracks: songsInAlbum
+        .map((song) => (
+              song.id.toString(),
+              song.title,
+              song.discNumber,
+              song.trackNumber,
+            ))
+        .toList(),
+  );
+}
 
 class AndroidMediaStoreSelectorState {
   final List<amsdata.AlbumSummary>? albums;
@@ -26,24 +52,132 @@ class AndroidMediaStoreSelectorState {
     required this.albumArt,
   });
 
+  ImportSessionGenerator? get importSessionGenerator {
+    if (albums == null || selectedAlbumId == null || songsInAlbum == null) {
+      return null;
+    } else {
+      return (DbRepo db) async {
+        final selectedAlbum = albums!.where((a) => a.id == selectedAlbumId).first;
+        final session = ImportSession(db: db);
+        final backendArtist = selectedAlbum.mainArtistId == 0
+            ? null
+            : BackendArtist(
+                logicalArtistId: ArtistId.unspecified,
+                backend: androidMediaStoreBackendId,
+                stableId: null,
+                unstableId: selectedAlbum.mainArtistId.toString(),
+                name: selectedAlbum.mainArtist,
+                extra: null,
+                coverArt: null,
+              );
+        final importedAlbumArtists = backendArtist != null
+            ? [
+                await session.addArtist(backendArtist),
+              ]
+            : <ArtistRef>[];
+        final backendAlbum = amsBackendAlbum(selectedAlbum, songsInAlbum!);
+        final album = await session.addAlbum(backendAlbum, importedAlbumArtists);
+        for (final song in songsInAlbum!) {
+          final backendSong = BackendSong(
+            logicalSongId: SongId.unspecified,
+            backend: androidMediaStoreBackendId,
+            stableId: null,
+            unstableId: song.id.toString(),
+            name: song.title,
+            firstArtist: song.mainArtist,
+            firstAlbum: backendAlbum.name,
+            playbackPriority: 0,
+            extra: null,
+            coverArt: null, // TODO
+          );
+          late final List<ArtistRef> artists;
+          if (selectedAlbum.mainArtistId == song.mainArtistId) {
+            artists = importedAlbumArtists;
+          } else if (song.mainArtistId != 0) {
+            // TODO dedupe if multiple songs have the same nonzero mainArtistId
+            // that is not the album main artist
+            final songBackendArtist = BackendArtist(
+              logicalArtistId: ArtistId.unspecified,
+              backend: androidMediaStoreBackendId,
+              stableId: null,
+              unstableId: selectedAlbum.mainArtistId.toString(),
+              name: selectedAlbum.mainArtist,
+              extra: null,
+              coverArt: null,
+            );
+            artists = [await session.addArtist(songBackendArtist)];
+          } else {
+            artists = <ArtistRef>[];
+          }
+
+          await session.addSong(
+            backendSong,
+            artists,
+            (album, song.discNumber, song.trackNumber),
+            null,
+          );
+        }
+
+        return session;
+      };
+    }
+  }
+
+  /*
   List<BackendSetOfSongsToImport> getSongsToImport() {
     if (albums == null || selectedAlbumId == null || songsInAlbum == null) {
       return [];
     }
     final selectedAlbum = albums!.where((a) => a.id == selectedAlbumId).first;
-    final backend_artists = <String, BackendSpecificArtist>{};
-    final backend_songs = <String, BackendSpecificSong>{};
-    final backend_albums = <String, BackendSpecificAlbum>{
+    final backendArtists = <String, BackendSpecificArtist>{};
+    final backendSongs = <String, BackendSpecificSong>{};
+    final backendAlbums = <String, BackendSpecificAlbum>{
       "$selectedAlbumId": BackendSpecificAlbum(
         name: selectedAlbum.title,
-        suggestedMusicbrainzUuid: null,
+        metadatas: [
+          BackendSong(
+            albumId: AlbumId.unspecified,
+            origin: androidMediaStoreMetadataOrigin,
+            id: null,
+            name: selectedAlbum.title,
+            firstArtist: null,
+            extra: null,
+            coverArt: null, // TODO?
+            tracks: songsInAlbum!.map((song) => (null, song.title, song.discNumber, song.trackNumber)).toList(),
+          )
+        ],
       ),
     };
     for (final song in songsInAlbum!) {
-      backend_artists["${song.mainArtistId}"] = BackendSpecificArtist(name: song.mainArtist, suggestedMusicbrainzUuid: null);
-      backend_songs["${song.id}"] = BackendSpecificSong(
+      backendArtists.putIfAbsent("${song.mainArtistId}", () {
+        return BackendSpecificArtist(
+          name: song.mainArtist,
+          metadatas: [
+            BackendArtist(
+              artistId: ArtistId.unspecified,
+              origin: androidMediaStoreMetadataOrigin,
+              stableId: null,
+              name: song.mainArtist,
+              extra: null,
+              coverArt: null,
+            )
+          ],
+        );
+      });
+      backendSongs["${song.id}"] = BackendSpecificSong(
         name: song.title,
-        suggestedMusicbrainzUuid: null,
+        metadatas: [
+          SongMetadata(
+            songId: SongId.unspecified,
+            origin: androidMediaStoreMetadataOrigin,
+            id: null,
+            name: song.title,
+            firstArtist: song.mainArtist,
+            firstAlbum: selectedAlbum.title,
+            extra: null,
+            coverArt: null,
+          )
+        ],
         lengthS: song.durationMs ~/ 1000,
         album: BackendSpecificSongAlbumLink(
           albumId: "$selectedAlbumId",
@@ -60,12 +194,13 @@ class AndroidMediaStoreSelectorState {
       BackendSetOfSongsToImport(
         backendId: androidMediaStoreBackendId,
         userFacingName: selectedAlbum.title,
-        artists: backend_artists,
-        albums: backend_albums,
-        songs: backend_songs,
+        artists: backendArtists,
+        albums: backendAlbums,
+        songs: backendSongs,
       ),
     ];
   }
+  */
 }
 
 class AndroidMediaStoreSelectorEvent {}
@@ -85,7 +220,7 @@ class AndroidMediaStoreUpdateAlbumArtEvent extends AndroidMediaStoreSelectorEven
 }
 
 class AndroidMediaStoreSelectorBloc extends Bloc<AndroidMediaStoreSelectorEvent, AndroidMediaStoreSelectorState> {
-  AndroidMediaStoreSelectorBloc()
+  AndroidMediaStoreSelectorBloc(LibraryImportBloc parentBloc)
       : super(
           AndroidMediaStoreSelectorState(
             albums: null,
@@ -99,8 +234,9 @@ class AndroidMediaStoreSelectorBloc extends Bloc<AndroidMediaStoreSelectorEvent,
       while (albums == null) {
         albums = await AndroidMusicStore().listAllAlbums();
       }
-      AndroidMusicStore().requestArtsForAlbums(500 /* TODO */, albums.map((a) => a.id));
       albums.sort((a, b) => a.title.compareTo(b.title));
+      // Request art after sorting so we get the art we see first.
+      AndroidMusicStore().requestArtsForAlbums(500 /* TODO */, albums.map((a) => a.id));
       // TODO exclude album IDs already logged in the backend?
       //  - ah, but the album may only be partially loaded? so we should mark the albums as either
       //    1. not imported 2. partially imported 3. fully imported
@@ -119,13 +255,25 @@ class AndroidMediaStoreSelectorBloc extends Bloc<AndroidMediaStoreSelectorEvent,
         } else {
           songs = null;
         }
+
+        final newState = AndroidMediaStoreSelectorState(
+          albums: state.albums,
+          selectedAlbumId: event.selectedAlbumId,
+          songsInAlbum: songs,
+          albumArt: state.albumArt,
+        );
+
+        final sessionGenerator = newState.importSessionGenerator;
+        if (sessionGenerator != null) {
+          parentBloc.add(
+            LibrarySelectSongsToImportEvent(
+              sessionGenerator: sessionGenerator,
+            ),
+          );
+        }
+
         emit(
-          AndroidMediaStoreSelectorState(
-            albums: state.albums,
-            selectedAlbumId: event.selectedAlbumId,
-            songsInAlbum: songs,
-            albumArt: state.albumArt,
-          ),
+          newState,
         );
       },
       transformer: sequential(),
@@ -172,14 +320,7 @@ class AndroidMediaStoreLibraryPlugin extends LibraryPlugin {
   String get dataBackendId => androidMediaStoreBackendId;
 
   @override
-  int get dbVersion => 1;
-
-  @override
-  Future<void> upgradeDb(DatabaseExecutor db, int oldVersion) async {
-    if (oldVersion < 1) {
-      // no database for version 1.
-    }
-  }
+  List<Future<void> Function(DatabaseExecutor p1)> get migrations => [];
 
   Widget? _makeGridView(amsalbum.AlbumArtStore albumArt, List<amsdata.AlbumSummary>? albums, int? selectedAlbumId) {
     if (albums == null) {
@@ -265,16 +406,13 @@ class AndroidMediaStoreLibraryPlugin extends LibraryPlugin {
   @override
   Widget buildSelectSongSetsToImportWidget(BuildContext context) {
     return BlocProvider(
-      create: (context) => AndroidMediaStoreSelectorBloc()..add(AndroidMediaStoreStartLoadingAlbums()),
+      create: (context) => AndroidMediaStoreSelectorBloc(context.read<LibraryImportBloc>())..add(AndroidMediaStoreStartLoadingAlbums()),
       child: BlocBuilder<AndroidMediaStoreSelectorBloc, AndroidMediaStoreSelectorState>(
         builder: (context, state) {
-          final songsToImport = state.getSongsToImport();
-          context.read<LibraryImportBloc>().add(
-                LibrarySelectSongsToImportEvent(
-                  songSetsToImport: songsToImport,
-                ),
+          return _makeGridView(state.albumArt, state.albums, state.selectedAlbumId) ??
+              Center(
+                child: CircularProgressIndicator(),
               );
-          return _makeGridView(state.albumArt, state.albums, state.selectedAlbumId) ?? Center(child: CircularProgressIndicator());
         },
       ),
     );

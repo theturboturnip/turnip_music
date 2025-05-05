@@ -56,8 +56,8 @@ Future<void> main() async {
     libraryPlugins: getLibraryPluginsForPlatform(),
   );
   final dbRepo = await DbRepo.createDatabase(
-    dbPath,
-    pluginRepo.dbUsers,
+    pluginRepo,
+    path: dbPath,
   );
 
   runApp(MyApp(

@@ -1,0 +1,599 @@
+// We assume a single import session encompasses one or more songs, zero or more albums, and zero or more artists, all from the same backend.
+//
+
+import 'package:turnip_music/library/data/song.dart';
+import 'package:turnip_music/library/data/tag_album.dart';
+import 'package:turnip_music/library/data/tag_artist.dart';
+import 'package:turnip_music/library/importing.dart';
+import 'package:turnip_music/repos/db/db_repo.dart';
+
+class CreateOrExisting<TCreate, TExist> {
+  final TCreate? createNew;
+  final String? linkToNewlyCreated;
+  final TExist? linkToExistingInDb;
+
+  CreateOrExisting({
+    required this.createNew,
+    required this.linkToNewlyCreated,
+    required this.linkToExistingInDb,
+  }) {
+    // assert(!(this.createNew == null && this.linkToExisting == null), "CreateOrExisting requires exactly one of 'createNew' or 'linkToExisting' to be non-null");
+    // assert(!(this.createNew != null && this.linkToExisting != null), "CreateOrExisting requires exactly one of 'createNew' or 'linkToExisting' to be non-null");
+    int numNonNull = 0;
+    if (createNew != null) numNonNull++;
+    if (linkToNewlyCreated != null) numNonNull++;
+    if (linkToExistingInDb != null) numNonNull++;
+
+    assert(numNonNull == 1, "CreateOrExisting requires exactly one entry to be non-null, got $numNonNull: $createNew $linkToNewlyCreated $linkToExistingInDb");
+  }
+
+  factory CreateOrExisting.create(TCreate createNew) => CreateOrExisting(
+        createNew: createNew,
+        linkToNewlyCreated: null,
+        linkToExistingInDb: null,
+      );
+  factory CreateOrExisting.newlyCreated(String newlyCreated) => CreateOrExisting(
+        createNew: null,
+        linkToNewlyCreated: newlyCreated,
+        linkToExistingInDb: null,
+      );
+  factory CreateOrExisting.existingDb(TExist linkToExisting) => CreateOrExisting(
+        createNew: null,
+        linkToNewlyCreated: null,
+        linkToExistingInDb: linkToExisting,
+      );
+}
+
+typedef CreateOrExistingAlbum = CreateOrExisting<Album, AlbumId>;
+typedef CreateOrExistingArtist = CreateOrExisting<(Artist, List<BackendArtist>), ArtistId>;
+typedef CreateOrExistingSong = CreateOrExisting<(Song, List<CreateOrExistingArtist>), SongId>;
+
+// Import plan hierarchy should be logical first
+// e.g.
+// Create logical album FINAL FANTASY 7 REBIRTH from backend:BLAH using metadata from MusicBrainz
+// Create logical song
+
+// Simple operator for seeing if two names A and B match:
+// - if A is equal to B, matches.
+// - if A is a prefix of B, matches.
+// - if B is a prefix of A, matches.
+// - if A is a postfix of B, matches.
+// - if B is a postfix of A, matches.
+// The time complexity is linear in the length of the shorter string.
+// If lower: true is selected, strings are lowercased before comparison.
+bool prefixPostfixMatch(String a, String b, {bool lower = true}) {
+  if (lower) {
+    a = a.toLowerCase();
+    b = b.toLowerCase();
+  }
+  // n_a = n_b, O(n_a)
+  if (a == b) {
+    return true;
+  }
+  if (a.length < b.length) {
+    // O(n_a)
+    if (b.startsWith(a)) {
+      return true;
+    }
+    // O(n_a)
+    if (b.endsWith(a)) {
+      return true;
+    }
+  } else if (a.length > b.length) {
+    // O(n_b)
+    if (a.startsWith(b)) {
+      return true;
+    }
+    // O(n_b)
+    if (a.endsWith(b)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// TODO surround in a Bloc. This is a Bloc. The whole point of the Bloc is complex state management.
+class ImportDataCache {
+  DbRepo? db;
+
+  // Mappings of backendIds to new items we plan to add to the database
+  final backendIdToSongToCreate = <String, ImportPlan2AddSong>{};
+  final backendIdToArtistToCreate = <String, (Artist, List<BackendArtist>)>{};
+  final backendIdToAlbumToCreate = <String, ImportPlan2ActionGroupImportAlbum>{};
+
+  // Mapping of (backendId for a BackendSpecificSong) to
+  // (backendId for a BackendSpecificSong that was turned into a newly created logical Song matching this metadata).
+  // If a song is present in backendIdToSongToCreate i.e. maps directly to a new song we'll create,
+  // then its backend ID will be present here and map to itself.
+  // If a song is not in backendIdToSongToCreate, but *it intends to map to a logical song in backendIdToSongToCreate*,
+  // then its backend ID will be present here and map to *the backend ID of the song that maps to the logical song in backendIdToSongToCreate*.
+  // So all *values* of this map are IDs with entries present in backendIdToSongToCreate,
+  // but not all *keys* of this map will be.
+  final backendIdToNewlyCreatedSongBackendId = <String, String>{};
+  // ditto, but for artists
+  final backendIdToNewlyCreatedArtistBackendId = <String, String>{};
+  // ditto, but for albums?
+  final backendIdToNewlyCreatedAlbumBackendId = <String, String>{};
+
+  final backendIdToPreexistingSongDbId = <String, SongId>{};
+  final backendIdToPreexistingArtistDbId = <String, ArtistId>{};
+  final backendIdToPreexistingAlbumDbId = <String, AlbumId>{};
+
+  // TODO see if this is necessary.
+  // static RegExp songTrackPrefix = RegExp(r"^\d[\d_\-]*");
+
+  String songGetSanitizedName(SongMetadata metadata) {
+    // TODO if a song is imported in a group could do some fancy detection of e.g. the track names being at the front and stripping them out.
+    // For now, I'm not sure that's reliable enough.
+    return metadata.name;
+  }
+
+  String? searchBySongMetadataInCreated(Iterable<SongMetadata> metadatas) {
+    // Quadratic search over metadatas provided and metadatas contained in each planned song.
+    // This one might be worrying - the number of songs imported in one go may be in the order of 100 -
+    // but a lot of this will probably short circuit.
+    for (final metadata in metadatas) {
+      final metadataName = songGetSanitizedName(metadata);
+      for (final plannedSong in backendIdToSongToCreate.entries) {
+        if (plannedSong.value.metadatas.any(
+          (plannedMetadata) {
+            return (plannedMetadata.origin == metadata.origin) &&
+                (plannedMetadata.id == metadata.id || plannedMetadata.id == null || metadata.id == null) &&
+                prefixPostfixMatch(plannedMetadata.name, metadata.name);
+          },
+        )) {
+          return plannedSong.key;
+        }
+        final plannedName = plannedSong.value.logicalSong.createNew!.$1.name;
+        if (prefixPostfixMatch(metadataName, plannedName)) {
+          return plannedSong.key;
+        }
+      }
+    }
+    return null;
+  }
+
+  String artistGetSanitizedName(BackendArtist metadata) {
+    // TODO can we do anything here?
+    return metadata.name;
+  }
+
+  String? searchByArtistMetadataInCreated(Iterable<BackendArtist> metadatas) {
+    // Quadratic search over metadatas provided and metadatas contained in each planned song.
+    // This is fine because the number of unique artists imported probably won't be too big.
+    for (final metadata in metadatas) {
+      final metadataName = artistGetSanitizedName(metadata);
+      for (final plannedArtist in backendIdToArtistToCreate.entries) {
+        if (plannedArtist.value.$2.any(
+          (plannedMetadata) {
+            return (plannedMetadata.origin == metadata.origin) &&
+                (plannedMetadata.stableId == metadata.stableId || plannedMetadata.stableId == null || metadata.stableId == null) &&
+                prefixPostfixMatch(plannedMetadata.name, metadata.name);
+          },
+        )) {
+          return plannedArtist.key;
+        }
+        final plannedName = plannedArtist.value.$1.name;
+        if (prefixPostfixMatch(metadataName, plannedName)) {
+          return plannedArtist.key;
+        }
+      }
+    }
+    return null;
+  }
+
+  // Example things we want to strip from:
+  // - "Winnie the Pooh - Disc 3 of 3" -> "Winnie the Pooh"
+  // - "Assassination Classroom -Music Memories- DISC1" -> "Assassination Classroom -Music Memories-"
+  static RegExp albumDiscRegex = RegExp(
+      // Find preceding separators (optional) before the disc number.
+      // Require at least one space between the separator and preceding content,
+      // so that e.g. formatting characters paired with earlier formatting characters
+      // are not treated as separators as in the Assassination Classroom case.
+      r"(\s+[-_:;/])?"
+      // Find DISC or DISK in any case, optionally with whitespace between the word and number
+      r"\s*[Dd][Ii][Ss][CcKk]\s*(\d+)"
+      // Optionally, pick up "of X". Also case-insensitive.
+      r"(\s*[Oo][Ff]\s*\d+)?");
+
+  // TODO test this
+  (String, int?) albumGetSanitizedName(BackendSong metadata) {
+    Match? discMatch;
+    String nameWithoutDisc = metadata.name.replaceFirstMapped(albumDiscRegex, (match) {
+      discMatch = match;
+      return "";
+    }).trim();
+    // In some cases, the whole name may be "Disk <N>".
+    // Make sure to handle that.
+    if (nameWithoutDisc.isNotEmpty) {
+      final discStr = discMatch?.group(2);
+      return (nameWithoutDisc, (discStr != null) ? int.tryParse(discStr) : null);
+    }
+    return (metadata.name, null);
+  }
+
+  String? searchByAlbumMetadataInCreated(Iterable<BackendSong> metadatas) {
+    // Quadratic search over metadatas provided and metadatas contained in each planned song.
+    // This is fine because the number of unique albums imported probably won't be too big.
+    for (final metadata in metadatas) {
+      final (metadataName, _discNum) = albumGetSanitizedName(metadata);
+      for (final plannedAlbum in backendIdToAlbumToCreate.entries) {
+        if (plannedAlbum.value.metadatas.any(
+          (plannedMetadata) {
+            return (plannedMetadata.origin == metadata.origin) &&
+                (plannedMetadata.id == metadata.id || plannedMetadata.id == null || metadata.id == null) &&
+                prefixPostfixMatch(plannedMetadata.name, metadata.name);
+          },
+        )) {
+          return plannedAlbum.key;
+        }
+        final plannedName = plannedAlbum.value.album.createNew!.name;
+        if (prefixPostfixMatch(metadataName, plannedName)) {
+          return plannedAlbum.key;
+        }
+      }
+    }
+    return null;
+  }
+
+  Future<CreateOrExistingArtist> lookupLogicalArtistForBackendArtist(
+    String artistIdInBackend,
+    BackendSpecificArtist backendArtist,
+  ) async {
+    // First, look if we've already created the artist with this ID
+    final backendIdOfAlreadyNewlyCreatedArtist = backendIdToNewlyCreatedSongBackendId[artistIdInBackend];
+    if (backendIdOfAlreadyNewlyCreatedArtist != null) {
+      return CreateOrExistingArtist.newlyCreated(backendIdOfAlreadyNewlyCreatedArtist);
+    }
+
+    // Next, look if we've already created a song which matches this metadata
+    final String? foundArtistBackendIdInCreated = searchByArtistMetadataInCreated(backendArtist.metadatas);
+    if (foundArtistBackendIdInCreated != null) {
+      backendIdToNewlyCreatedSongBackendId[artistIdInBackend] = foundArtistBackendIdInCreated;
+      return CreateOrExistingArtist.newlyCreated(foundArtistBackendIdInCreated);
+    }
+
+    // Next, check if we've already found a matching logical artist in the database for this backend ID
+    final preexistingArtistId = backendIdToPreexistingArtistDbId[artistIdInBackend];
+    if (preexistingArtistId != null) {
+      return CreateOrExistingArtist.existingDb(preexistingArtistId);
+    }
+
+    // Next, actually look in the backend DB for a logical artist matching this metadata
+    final ArtistId? foundArtistInDb = await db?.lookupArtistByMetadatas(
+      backendArtist.metadatas,
+    );
+    if (foundArtistInDb != null) {
+      backendIdToPreexistingArtistDbId[artistIdInBackend] = foundArtistInDb;
+      return CreateOrExistingArtist.existingDb(foundArtistInDb);
+    }
+
+    // Create the artist from scratch.
+    backendIdToNewlyCreatedSongBackendId[artistIdInBackend] = artistIdInBackend;
+    return CreateOrExistingArtist.create(
+      (
+        Artist(name: backendArtist.name),
+        backendArtist.metadatas,
+      ),
+    );
+  }
+
+  Future<CreateOrExistingSong> lookupLogicalSongForBackendSong(
+    String songIdInBackend,
+    BackendSpecificSong backendSong,
+    Map<String, BackendSpecificArtist> backendArtists,
+  ) async {
+    // First, look if we've already created the song with this ID
+    final backendIdOfAlreadyNewlyCreatedSong = backendIdToNewlyCreatedSongBackendId[songIdInBackend];
+    if (backendIdOfAlreadyNewlyCreatedSong != null) {
+      return CreateOrExistingSong.newlyCreated(backendIdOfAlreadyNewlyCreatedSong);
+    }
+
+    // Next, look if we've already created a song which matches this metadata
+    final String? foundSongBackendIdInCreated = searchBySongMetadataInCreated(backendSong.metadatas);
+    if (foundSongBackendIdInCreated != null) {
+      backendIdToNewlyCreatedSongBackendId[songIdInBackend] = foundSongBackendIdInCreated;
+      return CreateOrExistingSong.newlyCreated(foundSongBackendIdInCreated);
+    }
+
+    // Next, check if we've already found a matching logical song in the database for this backend ID
+    final preexistingSongId = backendIdToPreexistingSongDbId[songIdInBackend];
+    if (preexistingSongId != null) {
+      return CreateOrExistingSong.existingDb(preexistingSongId);
+    }
+
+    // Next, actually look in the backend DB for a logical song matching this metadata
+    final SongId? foundSongInDb = await db?.lookupSongByMetadatas(
+      backendSong.metadatas,
+    );
+    if (foundSongInDb != null) {
+      backendIdToPreexistingSongDbId[songIdInBackend] = foundSongInDb;
+      return CreateOrExistingSong.existingDb(foundSongInDb);
+    }
+
+    // We have exausted all possible options - the song simply doesn't exist here.
+
+    // Create the song from scratch.
+
+    // Lookup the artists
+    final artists = await Future.wait(backendSong.artistIds.map((artistBackendId) {
+      return lookupLogicalArtistForBackendArtist(artistBackendId, backendArtists[artistBackendId]!);
+    }));
+
+    backendIdToNewlyCreatedSongBackendId[songIdInBackend] = songIdInBackend;
+    return CreateOrExistingSong.create((
+      Song(
+        name: backendSong.name,
+        lengthSeconds: backendSong.lengthS,
+      ),
+      artists,
+    ));
+  }
+
+  Future<CreateOrExistingAlbum> lookupLogicalAlbumForBackendAlbum(
+    String albumIdInBackend,
+    BackendSpecificAlbum backendAlbum,
+  ) async {
+    // TODO some sort of feedback that "hey, we think this backend album is a specific disc of a larger album"
+
+    // First, look if we've already created a album with this ID
+    final backendIdOfAlreadyNewlyCreatedAlbum = backendIdToNewlyCreatedAlbumBackendId[albumIdInBackend];
+    if (backendIdOfAlreadyNewlyCreatedAlbum != null) {
+      return CreateOrExistingAlbum.newlyCreated(backendIdOfAlreadyNewlyCreatedAlbum);
+    }
+
+    // Next, look if we've already created a album which matches this metadata
+    final String? foundAlbumBackendIdInCreated = searchByAlbumMetadataInCreated(backendAlbum.metadatas);
+    if (foundAlbumBackendIdInCreated != null) {
+      backendIdToNewlyCreatedAlbumBackendId[albumIdInBackend] = foundAlbumBackendIdInCreated;
+      return CreateOrExistingAlbum.newlyCreated(foundAlbumBackendIdInCreated);
+    }
+
+    // Next, check if we've already found a matching logical album in the database for this backend ID
+    final preexistingAlbumId = backendIdToPreexistingAlbumDbId[albumIdInBackend];
+    if (preexistingAlbumId != null) {
+      return CreateOrExistingAlbum.existingDb(preexistingAlbumId);
+    }
+
+    // Next, actually look in the backend DB for a logical album matching this metadata
+    final AlbumId? foundSongInDb = await db?.lookupAlbumByMetadatas(
+      backendAlbum.metadatas,
+    );
+    if (foundSongInDb != null) {
+      backendIdToPreexistingAlbumDbId[albumIdInBackend] = foundSongInDb;
+      return CreateOrExistingAlbum.existingDb(foundSongInDb);
+    }
+
+    // We have exausted all possible options - the album simply doesn't exist here.
+
+    // Create the album from scratch.
+
+    backendIdToNewlyCreatedSongBackendId[albumIdInBackend] = albumIdInBackend;
+    return CreateOrExistingAlbum.create(
+      Album(
+        name: backendAlbum.name,
+      ),
+    );
+  }
+}
+
+Stream<List<ImportPlan2ActionGroup>> makeImportPlan(ImportDataCache cache, List<BackendSetOfSongsToImport> songSets) async* {
+  // final albumFromInternalId = <String, CreateOrExistingAlbum>{};
+  // final artistFromInternalId = <String, CreateOrExistingArtist>{};
+  // final songFromInternalId = <String, CreateOrExistingSong>{};
+
+  final completedGroups = <ImportPlan2ActionGroup>[];
+
+  for (final set in songSets) {
+    if (set.albums.values.length != 1 || set.songs.values.any((song) => song.album == null)) {
+      // ImportPlan2ActionGroupImportTag
+      final initialName = set.userFacingName;
+      final tag = set.userFacingName;
+      final songs = <ImportPlan2AddSong>[];
+
+      for (final songEntry in set.songs.entries) {
+        final songIdInBackend = songEntry.key;
+        final backendSong = songEntry.value;
+
+        final logicalSong = await cache.lookupLogicalSongForBackendSong(
+          songIdInBackend,
+          backendSong,
+          set.artists,
+        );
+
+        songs.add(ImportPlan2AddSong(
+          logicalSong: logicalSong,
+          playback: SongPlaybackSource(
+            songId: SongId.unspecified,
+            backendId: set.backendId,
+            idInBackend: songIdInBackend,
+            priorityInBackend: 0,
+          ),
+          metadatas: backendSong.metadatas,
+        ));
+
+        yield [
+          ...completedGroups,
+          ImportPlan2ActionGroupImportTag(
+            initialName: initialName,
+            tag: tag,
+            songs: songs.toList(), // shallow copy of list so when we do .add next time it doesn't modify this
+          )
+        ];
+      }
+
+      // We have figured out all imports in a tag
+      completedGroups.add(
+        ImportPlan2ActionGroupImportTag(
+          initialName: initialName,
+          tag: tag,
+          songs: songs, // not modifying any more so can take by reference
+        ),
+      );
+    } else {
+      // ImportPlan2ActionGroupImportAlbum
+
+      final entry = set.albums.entries.first;
+      final albumIdInBackend = entry.key;
+      final backendAlbum = entry.value;
+
+      final logicalAlbum = await cache.lookupLogicalAlbumForBackendAlbum(albumIdInBackend, backendAlbum);
+      final songs = <ImportPlan2AddSongToAlbum>[];
+
+      int i = 0;
+      for (final songEntry in set.songs.entries) {
+        final songIdInBackend = songEntry.key;
+        final backendSong = songEntry.value;
+
+        if (backendSong.album?.albumId != albumIdInBackend) continue;
+
+        final logicalSong = await cache.lookupLogicalSongForBackendSong(
+          songIdInBackend,
+          backendSong,
+          set.artists,
+        );
+
+        (int, int) trackNum = (backendSong.album!.disc, backendSong.album!.track);
+        bool foundBetterTrackNum = false;
+        for (final metadata in backendAlbum.metadatas.reversed) {
+          for (final (_trackSongIdInBackend, trackName, trackDisc, trackTrack) in metadata.tracks) {
+            if (trackName == backendSong.name) {
+              trackNum = (trackDisc, trackTrack);
+              foundBetterTrackNum = true;
+            }
+          }
+          if (foundBetterTrackNum) break;
+        }
+
+        songs.add(ImportPlan2AddSongToAlbum(
+          logicalSong: logicalSong,
+          playback: SongPlaybackSource(
+            songId: SongId.unspecified,
+            backendId: set.backendId,
+            idInBackend: songIdInBackend,
+            priorityInBackend: 0,
+          ),
+          metadatas: backendSong.metadatas,
+          disc: trackNum.$1,
+          track: trackNum.$2,
+        ));
+
+        yield [
+          ...completedGroups,
+          ImportPlan2ActionGroupImportAlbum(
+            album: logicalAlbum,
+            metadatas: backendAlbum.metadatas,
+            songs: songs.toList(), // shallow copy of list so when we do .add next time it doesn't modify this
+          )
+        ];
+
+        i++;
+      }
+
+      // We have figured out all imports in an album
+      completedGroups.add(
+        ImportPlan2ActionGroupImportAlbum(
+          album: logicalAlbum,
+          metadatas: backendAlbum.metadatas,
+          songs: songs, // not modifying any more so can take by reference
+        ),
+      );
+    }
+  }
+
+  yield completedGroups;
+}
+
+// class ImportPlan2Builder {
+//   final DbRepo? dbToSearch;
+
+//   final Map<String, Album>
+//   final List<(Artist, List<ArtistMetadata>)> artistsToCreate;
+//   final List<(Song, List<SongMetadata>)> songsToCreate;
+
+//   final List<ImportPlan2ActionGroup> groups;
+//   ImportPlan2Builder? groupBuilder;
+
+//   // Functions for guessing
+
+//   Future<CreateOrExistingArtist> guessPreexistingArtist(String internalArtistId, ArtistMetadata metadata) {}
+//   Future<CreateOrExistingAlbum> guessPreexistingAlbum(String internalAlbumId, AlbumMetadata metadata);
+//   Future<CreateOrExistingSong> guessPreexistingSong(
+//     String internalSongId,
+//     List<(SongMetadata, List<ArtistMetadata>)> metadatas,
+//     SongPlaybackSource playback,
+//   ) {}
+// }
+
+// class ImportPlan2AlbumBuilder {}
+
+class ImportPlan2 {
+  final List<ImportPlan2ActionGroup> groups;
+
+  ImportPlan2({
+    required this.groups,
+  });
+}
+
+abstract class ImportPlan2ActionGroup {
+  List<ImportPlan2AddSong> get songs;
+}
+
+class ImportPlan2ActionGroupImportAlbum extends ImportPlan2ActionGroup {
+  final CreateOrExistingAlbum album;
+  // The metadata from the backend.
+  // The song metadata from each AlbumMetadata is searched
+  // to identify the initial disc/track settings for each song.
+  // TODO search this backwards because we believe extra metadata is more accurate?
+  final List<BackendSong> metadatas;
+
+  @override
+  final List<ImportPlan2AddSongToAlbum> songs;
+
+  ImportPlan2ActionGroupImportAlbum({
+    required this.album,
+    required this.metadatas,
+    required this.songs,
+  });
+}
+
+class ImportPlan2ActionGroupImportTag extends ImportPlan2ActionGroup {
+  final String initialName;
+  final String tag;
+
+  @override
+  final List<ImportPlan2AddSong> songs;
+
+  ImportPlan2ActionGroupImportTag({
+    required this.initialName,
+    required this.tag,
+    required this.songs,
+  });
+}
+
+// A plan to import (SongPlaybackSource, List<SongMetadata, List<ArtistMetadata>>) into the database
+// connected to either a preexisting logical song or a new logical song.
+class ImportPlan2AddSong {
+  final CreateOrExistingSong logicalSong;
+  final SongPlaybackSource playback;
+  final List<SongMetadata> metadatas;
+
+  ImportPlan2AddSong({
+    required this.logicalSong,
+    required this.playback,
+    required this.metadatas,
+  });
+}
+
+class ImportPlan2AddSongToAlbum extends ImportPlan2AddSong {
+  final int? disc;
+  final int? track;
+
+  ImportPlan2AddSongToAlbum({
+    required super.logicalSong,
+    required super.playback,
+    required super.metadatas,
+    required this.disc,
+    required this.track,
+  });
+}

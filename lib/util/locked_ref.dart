@@ -14,8 +14,8 @@ import 'package:mutex/mutex.dart';
 /// which may have some concept of 'reads' and 'writes' while being use()-d,
 /// this lock only protects reading/writing *the reference to the database*,
 /// not the contents of the database.
-class RwLocked<T> {
-  RwLocked(this._item) : _mutex = ReadWriteMutex();
+class LockedRef<T> {
+  LockedRef(this._item) : _mutex = ReadWriteMutex();
 
   T _item;
   final ReadWriteMutex _mutex;
@@ -29,9 +29,11 @@ class RwLocked<T> {
   // Wait to take a write-lock, call consumeAndReplace() with the item once inside,
   // and replace the item with the value returned by consumeAndReplace.
   // Will never run concurrently with other swap() invocations or any use() invocation.
-  Future<void> swap(Future<T> Function(T) consumeAndReplace) {
-    return _mutex.protectWrite(() async {
-      _item = await consumeAndReplace(_item);
+  Future<TReturn> swap<TReturn>(Future<(T, TReturn)> Function(T) consumeAndReplace) {
+    return _mutex.protectWrite<TReturn>(() async {
+      final (item, r) = await consumeAndReplace(_item);
+      _item = item;
+      return r;
     });
   }
 }

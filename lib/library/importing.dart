@@ -1,277 +1,381 @@
+import 'package:sqflite/sqflite.dart';
+import 'package:turnip_music/library/data/db.dart';
 import 'package:turnip_music/library/data/song.dart';
 import 'package:turnip_music/library/data/tag_album.dart';
+import 'package:turnip_music/library/data/tag_artist.dart';
+import 'package:turnip_music/library/data/tag_user.dart';
+import 'package:turnip_music/repos/db/db_repo.dart';
 
-/// A set of songs harvested from a backend for importing
-class BackendSetOfSongsToImport {
-  final String backendId;
-  final String userFacingName;
+// TODO need to support "import x as y" somewhere.
 
-  final Map<String, BackendSpecificArtist> artists;
-  final Map<String, BackendSpecificAlbum> albums;
-  final Map<String, BackendSpecificSong> songs;
-
-  BackendSetOfSongsToImport({
-    required this.backendId,
-    required this.userFacingName,
-    required this.artists,
-    required this.albums,
-    required this.songs,
-  });
+abstract class Action<T> {
+  // TODO make this abstract
+  Future<void> execute(DatabaseExecutor txn, ImportSession session, LibraryDbUser library) async {}
 }
 
-class BackendSpecificSongAlbumLink {
-  final String albumId;
-  final int disc;
-  final int track;
+class ActionRef<TData, T extends Action<TData>> {
+  final int id;
+  final TData? dbData; // If non-null, it's a database ID and this was the object in the database
 
-  BackendSpecificSongAlbumLink({
-    required this.albumId,
-    required this.disc,
-    required this.track,
-  });
+  ActionRef.actionIndex(this.id) : dbData = null;
+  ActionRef.databaseId(this.id, TData this.dbData);
 }
 
-class BackendSpecificSong {
-  final String name;
-  final String? suggestedMusicbrainzUuid;
-  final int lengthS;
-  final BackendSpecificSongAlbumLink? album;
-  final List<String> artistIds;
+// class CreatePlaylistAction extends Action<Playlist> {
+//   final String newPlaylistName;
 
-  BackendSpecificSong({
-    required this.name,
-    required this.suggestedMusicbrainzUuid,
-    required this.lengthS,
-    required this.album,
-    required this.artistIds,
-  });
+//   CreatePlaylistAction({required this.newPlaylistName});
+// }
+// typedef PlaylistRef = ActionRef<Playlist, CreatePlaylistAction>;
+
+/// Tags
+
+class ImportTagAction extends Action<UserTag> {
+  ImportTagAction({required this.tagName});
+
+  final String tagName;
 }
 
-class BackendSpecificAlbum {
-  final String name;
-  final String? suggestedMusicbrainzUuid;
+typedef TagRef = ActionRef<UserTag, ImportTagAction>;
 
-  BackendSpecificAlbum({
-    required this.name,
-    required this.suggestedMusicbrainzUuid,
-  });
+/// Artists
+
+abstract class ImportArtistAction extends Action<Artist> {
+  BackendArtist get importedData;
 }
 
-class BackendSpecificArtist {
-  final String name;
-  final String? suggestedMusicbrainzUuid;
+typedef ArtistRef = ActionRef<Artist, ImportArtistAction>;
 
-  BackendSpecificArtist({
-    required this.name,
-    required this.suggestedMusicbrainzUuid,
-  });
-}
-
-/// A plan for importing sets of songs, generated from BackendSetOfSongsToImport
-class ImportPlan {
-  final List<ImportPlanBackendSongSet> importSets;
-
-  ImportPlan({
-    required this.importSets,
-  });
-}
-
-abstract class ImportPlanBackendSongSet {
-  ImportPlanBackendSongSet();
-
-  String get finalName;
-  List<ImportPlanBackendSong> get songs;
-
-  ImportPlanBackendSongSet withNewName(String newName);
-}
-
-class ImportPlanBackendSongSetAsAlbum extends ImportPlanBackendSongSet {
-  // The (backendId, idWithinBackend) for the backend's song set
-  final (String, String) backendId;
-  final String backendName;
-
-  // If not null, the album that already exists in the database that this (backendId, idWithinBackend)
-  // will be linked to.
-  final (AlbumId, Album)? preexistingAlbum;
-
-  final String? newName;
-  final String? newMusicbrainzId;
-
+class CreateNewArtist extends ImportArtistAction {
   @override
-  String get finalName => newName ?? backendName;
+  final BackendArtist importedData;
+  final String newName;
 
-  // The set of songs to import, that will be linked to the album once imported
-  @override
-  final List<ImportPlanBackendSongLinkedToAlbum> songs;
-
-  ImportPlanBackendSongSetAsAlbum({
-    required this.backendId,
-    required this.backendName,
-    required this.preexistingAlbum,
+  CreateNewArtist({
+    required this.importedData,
     required this.newName,
-    required this.newMusicbrainzId,
-    required this.songs,
   });
-
-  // TODO artists
-
-  @override
-  ImportPlanBackendSongSet withNewName(String newName) {
-    return ImportPlanBackendSongSetAsAlbum(
-      backendId: backendId,
-      backendName: backendName,
-      preexistingAlbum: preexistingAlbum,
-      newName: newName,
-      newMusicbrainzId: newMusicbrainzId,
-      songs: songs,
-    );
-  }
-
-  ImportPlanBackendSongSetAsAlbum withNewMetadata(String newName, String newMusicbrainzId, List<ImportPlanBackendSongLinkedToAlbum> newSongs) {
-    return ImportPlanBackendSongSetAsAlbum(
-      backendId: backendId,
-      backendName: backendName,
-      preexistingAlbum: preexistingAlbum,
-      newName: newName,
-      newMusicbrainzId: newMusicbrainzId,
-      songs: newSongs,
-    );
-  }
 }
 
-// TODO
-class ImportPlanBackendArtistLinkedToAlbum {}
+class ForcedLinkToExistingArtist extends ImportArtistAction {
+  @override
+  final BackendArtist importedData;
+  final ArtistRef existingArtist;
 
-class ImportPlanBackendSong {
-  // The (backendId, idWithinBackend) for the backend's song, if we're importing one
-  // null if we're only importing the song to fill out the album, not because we actually have the song
-  final (String, String)? backendId;
-  // The name this was referred to with on the backend
-  final String backendName;
+  ForcedLinkToExistingArtist({
+    required this.importedData,
+    required this.existingArtist,
+  });
+}
 
-  // If not null, the song that already exists in the database that this (backendId, idWithinBackend) will be linked to.
-  final (SongId, Song)? preexistingSong;
+// TODO SuggestedLinkToExistingArtist
 
-  // If preexistingSong = null, the metadata for the new song that will be imported
-  final String? newName;
-  final String? newMusicbrainzId;
+/// Albums
 
-  ImportPlanBackendSong({
-    required this.backendId,
-    required this.backendName,
-    required this.preexistingSong,
+abstract class ImportAlbumAction extends Action<Album> {
+  BackendAlbum get importedData;
+  List<ArtistRef> get linkedArtists;
+}
+
+typedef AlbumRef = ActionRef<Album, ImportAlbumAction>;
+
+class CreateNewAlbum extends ImportAlbumAction {
+  @override
+  final BackendAlbum importedData;
+  @override
+  final List<ArtistRef> linkedArtists;
+
+  final String newName;
+
+  CreateNewAlbum({
+    required this.importedData,
+    required this.linkedArtists,
     required this.newName,
-    required this.newMusicbrainzId,
-  });
-
-  // TODO artists
-}
-
-class ImportPlanBackendSongLinkedToAlbum extends ImportPlanBackendSong {
-  final int backendDiscNumber;
-  final int backendTrackNumber;
-
-  final SongToAlbum? preexistingSongToPreexistingAlbum;
-
-  final int? newDiscNumber;
-  final int? newTrackNumber;
-
-  int get finalDiscNumber => newDiscNumber ?? (preexistingSongToPreexistingAlbum?.disc ?? backendDiscNumber);
-  int get finalTrackNumber => newTrackNumber ?? (preexistingSongToPreexistingAlbum?.track ?? backendTrackNumber);
-
-  ImportPlanBackendSongLinkedToAlbum({
-    required super.backendId,
-    required super.backendName,
-    required this.backendDiscNumber,
-    required this.backendTrackNumber,
-    required super.preexistingSong,
-    required this.preexistingSongToPreexistingAlbum,
-    required super.newName,
-    required super.newMusicbrainzId,
-    required this.newDiscNumber,
-    required this.newTrackNumber,
   });
 }
 
-class ImportPlanBackendSongSetAsTag extends ImportPlanBackendSongSet {
-  final String backendName;
-  final String? tagName;
-
+class ForcedLinkToExistingAlbum extends ImportAlbumAction {
   @override
-  String get finalName => tagName ?? backendName;
-
-  // The set of songs to import, that will be linked to the tag once imported
+  final BackendAlbum importedData;
   @override
-  final List<ImportPlanBackendSong> songs;
+  final List<ArtistRef> linkedArtists;
 
-  ImportPlanBackendSongSetAsTag({
-    required this.backendName,
-    required this.tagName,
-    required this.songs,
+  final AlbumRef existingAlbum;
+
+  ForcedLinkToExistingAlbum({
+    required this.importedData,
+    required this.linkedArtists,
+    required this.existingAlbum,
   });
+}
 
+// TODO SuggestedLinkToExistinAlbum
+
+/// Songs
+
+abstract class ImportSongAction extends Action<Song> {
+  BackendSong get importedData;
+  // If it turns out the artists are already attached,
+  // don't re-add them.
+  List<ArtistRef> get newLinkedArtists;
+  (AlbumRef, int disc, int tracks)? get newLinkedAlbum;
+  TagRef? get linkToTag;
+  // PlaylistRef? get appendToPlaylist;
+}
+
+typedef SongRef = ActionRef<Song, ImportSongAction>;
+
+class CreateNewSong extends ImportSongAction {
   @override
-  ImportPlanBackendSongSet withNewName(String newName) {
-    return ImportPlanBackendSongSetAsTag(
-      backendName: backendName,
-      tagName: newName,
-      songs: songs,
-    );
+  final BackendSong importedData;
+  @override
+  final List<ArtistRef> newLinkedArtists;
+  @override
+  final (AlbumRef, int disc, int tracks)? newLinkedAlbum;
+  @override
+  final TagRef? linkToTag;
+  // final PlaylistRef? appendToPlaylist;
+
+  final String newName;
+
+  CreateNewSong({
+    required this.newLinkedArtists,
+    required this.newLinkedAlbum,
+    required this.linkToTag,
+    required this.importedData,
+    required this.newName,
+  });
+}
+
+class ForcedLinkToExistingSong extends ImportSongAction {
+  @override
+  final BackendSong importedData;
+  @override
+  final List<ArtistRef> newLinkedArtists;
+  @override
+  final (AlbumRef, int disc, int tracks)? newLinkedAlbum;
+  @override
+  final TagRef? linkToTag;
+  // final PlaylistRef? appendToPlaylist;
+
+  final SongRef existingSong;
+
+  ForcedLinkToExistingSong({
+    required this.importedData,
+    required this.newLinkedArtists,
+    required this.newLinkedAlbum,
+    required this.linkToTag,
+    required this.existingSong,
+  });
+}
+
+// TODO SuggestedLinkToExistingSong
+
+class ImportSession {
+  final DbRepo db;
+
+  final List<ImportTagAction> tagActions;
+  final List<ImportArtistAction> artistActions;
+  final List<ImportAlbumAction> albumActions;
+  final List<ImportSongAction> songActions;
+
+  Iterable<Action<dynamic>> get allActions => tagActions.cast<Action<dynamic>>().followedBy(artistActions).followedBy(albumActions).followedBy(songActions);
+
+  ImportSession({required this.db})
+      : tagActions = [],
+        artistActions = [],
+        albumActions = [],
+        songActions = [];
+
+  TagRef addTag(String tagName) {
+    final ref = TagRef.actionIndex(tagActions.length);
+    tagActions.add(ImportTagAction(tagName: tagName));
+    return ref;
   }
-}
 
-ImportPlan generateImportPlan(
-  List<BackendSetOfSongsToImport> songSets,
-  // {
-  //   void Function(ImportPlan)? onImportPlansInProgress,
-  // }
-) {
-  // Simple version
-  return ImportPlan(
-    importSets: songSets.map(
-      (songSet) {
-        if (songSet.albums.values.length != 1 || songSet.songs.values.any((song) => song.album == null)) {
-          // The set of albums used by the songs is not single-element, or it may include null.
-          // Either way, this should always be imported as a tag.
-          return ImportPlanBackendSongSetAsTag(
-            backendName: songSet.userFacingName,
-            tagName: songSet.userFacingName,
-            songs: songSet.songs.entries.map((song) {
-              return ImportPlanBackendSong(
-                backendId: (songSet.backendId, song.key),
-                backendName: song.value.name,
-                preexistingSong: null, // TODO populate!
-                newName: null,
-                newMusicbrainzId: null, // TODO populate!
-              );
-            }).toList(),
-          );
-        } else {
-          // There is exactly one backend album used by every song.
-          final album = songSet.albums.entries.first;
-          return ImportPlanBackendSongSetAsAlbum(
-            backendId: (songSet.backendId, album.key),
-            backendName: album.value.name,
-            preexistingAlbum: null, // TODO populate!
-            newName: songSet.userFacingName, // TODO should this be null
-            newMusicbrainzId: null, // TODO populate!
-            songs: songSet.songs.entries.map((song) {
-              return ImportPlanBackendSongLinkedToAlbum(
-                backendId: (songSet.backendId, song.key),
-                backendName: song.value.name,
-                backendDiscNumber: song.value.album!.disc,
-                backendTrackNumber: song.value.album!.track,
-                preexistingSong: null, // TODO populate!
-                preexistingSongToPreexistingAlbum: null, // TODO populate
-                newName: null,
-                newMusicbrainzId: null, // TODO populate!
-                newDiscNumber: null,
-                newTrackNumber: null,
-              );
-            }).toList(),
-          );
-        }
-      },
-    ).toList(),
-  );
+  String resolveArtistRefLogicalName(ArtistRef ref) {
+    while (ref.dbData == null) {
+      switch (artistActions[ref.id]) {
+        case CreateNewArtist newItem:
+          return newItem.newName;
+        case ForcedLinkToExistingArtist existing:
+          assert(existing.existingArtist.id < ref.id);
+          ref = existing.existingArtist;
+      }
+    }
+
+    return ref.dbData!.name;
+  }
+
+  String resolveAlbumRefLogicalName(AlbumRef ref) {
+    while (ref.dbData == null) {
+      switch (albumActions[ref.id]) {
+        case CreateNewAlbum newItem:
+          return newItem.newName;
+        case ForcedLinkToExistingAlbum existing:
+          assert(existing.existingAlbum.id < ref.id);
+          ref = existing.existingAlbum;
+      }
+    }
+
+    return ref.dbData!.name;
+  }
+
+  String resolveSongRefLogicalName(SongRef ref) {
+    while (ref.dbData == null) {
+      switch (songActions[ref.id]) {
+        case CreateNewSong newItem:
+          return newItem.newName;
+        case ForcedLinkToExistingSong existing:
+          assert(existing.existingSong.id < ref.id);
+          ref = existing.existingSong;
+      }
+    }
+
+    return ref.dbData!.name;
+  }
+
+  Future<ArtistRef> addArtist(BackendArtist backendArtist) async {
+    ArtistRef? existingArtist;
+
+    for (final (revIndex, action) in artistActions.reversed.indexed) {
+      final index = artistActions.length - 1 - revIndex;
+      if (action.importedData.unstableId == backendArtist.unstableId) {
+        existingArtist = ArtistRef.actionIndex(index);
+        break;
+      }
+    }
+
+    if (existingArtist == null) {
+      final existingDbPair = await db.useLibrary((db, library) {
+        return library.exactMatchArtistFromBackendUnstableId(db, backendArtist);
+      });
+      if (existingDbPair != null) {
+        final (id, data) = existingDbPair;
+        existingArtist = ArtistRef.databaseId(id.raw, data);
+      }
+    }
+
+    final newRef = ArtistRef.actionIndex(artistActions.length);
+
+    if (existingArtist == null) {
+      artistActions.add(CreateNewArtist(
+        importedData: backendArtist,
+        newName: backendArtist.name,
+      ));
+    } else {
+      artistActions.add(ForcedLinkToExistingArtist(
+        importedData: backendArtist,
+        existingArtist: existingArtist,
+      ));
+    }
+
+    return newRef;
+  }
+
+  Future<AlbumRef> addAlbum(BackendAlbum backendAlbum, List<ArtistRef> artists) async {
+    AlbumRef? existingAlbum;
+
+    for (final (revIndex, action) in albumActions.reversed.indexed) {
+      final index = albumActions.length - 1 - revIndex;
+      if (action.importedData.unstableId == backendAlbum.unstableId) {
+        existingAlbum = AlbumRef.actionIndex(index);
+        break;
+      }
+    }
+
+    if (existingAlbum == null) {
+      final existingDbPair = await db.useLibrary((db, library) {
+        return library.exactMatchAlbumFromBackendUnstableId(db, backendAlbum);
+      });
+      if (existingDbPair != null) {
+        final (id, data) = existingDbPair;
+        existingAlbum = AlbumRef.databaseId(id.raw, data);
+      }
+    }
+
+    final newRef = AlbumRef.actionIndex(albumActions.length);
+
+    if (existingAlbum == null) {
+      albumActions.add(CreateNewAlbum(
+        importedData: backendAlbum,
+        linkedArtists: artists,
+        newName: backendAlbum.name,
+      ));
+    } else {
+      albumActions.add(ForcedLinkToExistingAlbum(
+        importedData: backendAlbum,
+        linkedArtists: artists,
+        existingAlbum: existingAlbum,
+      ));
+    }
+
+    return newRef;
+  }
+
+  Future<SongRef?> addSong(
+    BackendSong backendSong,
+    List<ArtistRef> artists,
+    (AlbumRef, int disc, int track)? album,
+    TagRef? linkedTag,
+  ) async {
+    SongRef? existing;
+
+    for (final (revIndex, action) in songActions.reversed.indexed) {
+      final index = songActions.length - 1 - revIndex;
+      if (action.importedData.unstableId == backendSong.unstableId) {
+        existing = SongRef.actionIndex(index);
+        break;
+      }
+    }
+
+    if (existing == null) {
+      final existingDbPair = await db.useLibrary((db, library) {
+        return library.exactMatchSongFromBackendUnstableId(db, backendSong);
+      });
+      if (existingDbPair != null) {
+        final (id, data) = existingDbPair;
+        existing = SongRef.databaseId(id.raw, data);
+      }
+    }
+
+    final newRef = SongRef.actionIndex(songActions.length);
+
+    if (existing == null) {
+      songActions.add(CreateNewSong(
+        newLinkedArtists: artists,
+        newLinkedAlbum: album,
+        linkToTag: linkedTag,
+        importedData: backendSong,
+        newName: backendSong.name,
+      ));
+    } else {
+      songActions.add(ForcedLinkToExistingSong(
+        importedData: backendSong,
+        newLinkedArtists: artists,
+        newLinkedAlbum: album,
+        linkToTag: linkedTag,
+        existingSong: existing,
+      ));
+    }
+
+    return newRef;
+  }
+
+  Future<void> execute(LibraryDbUser library) {
+    return db.transaction((txn) async {
+      for (final action in tagActions) {
+        await action.execute(txn, this, library);
+      }
+      for (final action in artistActions) {
+        await action.execute(txn, this, library);
+      }
+      for (final action in albumActions) {
+        await action.execute(txn, this, library);
+      }
+      for (final action in songActions) {
+        await action.execute(txn, this, library);
+      }
+    });
+  }
 }

@@ -1,19 +1,21 @@
-import 'package:equatable/equatable.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:turnip_music/library/importing.dart';
 import 'package:turnip_music/library/library_plugin.dart';
+import 'package:turnip_music/repos/db/db_repo.dart';
 import 'package:turnip_music/repos/plugin_repo.dart';
 import 'package:turnip_music/util/empty_page.dart';
 
-abstract class LibraryImportState extends Equatable {
+typedef ImportSessionGenerator = Future<ImportSession> Function(DbRepo);
+
+abstract class LibraryImportState {
   const LibraryImportState({required this.availablePlugins});
 
   final List<LibraryPlugin> availablePlugins;
 
   LibraryPlugin? get importer;
-  List<BackendSetOfSongsToImport> get songSetsToImport;
+  ImportSessionGenerator? get sessionGenerator;
 }
 
 class InitialLibraryImportState extends LibraryImportState {
@@ -23,33 +25,21 @@ class InitialLibraryImportState extends LibraryImportState {
 
   @override
   LibraryPlugin? get importer => null;
-
   @override
-  List<BackendSetOfSongsToImport> get songSetsToImport => [];
-
-  @override
-  List<Object?> get props => [availablePlugins];
+  ImportSessionGenerator? get sessionGenerator => null;
 }
 
 class LibraryImportStateFromImporter extends LibraryImportState {
-  final LibraryPlugin _importer;
-  final List<BackendSetOfSongsToImport> _songSetsToImport;
+  @override
+  final LibraryPlugin importer;
+  @override
+  final ImportSessionGenerator? sessionGenerator;
 
   const LibraryImportStateFromImporter({
     required super.availablePlugins,
-    required LibraryPlugin importer,
-    required List<BackendSetOfSongsToImport> songSetsToImport,
-  })  : _importer = importer,
-        _songSetsToImport = songSetsToImport;
-
-  @override
-  LibraryPlugin? get importer => _importer;
-
-  @override
-  List<BackendSetOfSongsToImport> get songSetsToImport => _songSetsToImport;
-
-  @override
-  List<Object?> get props => [availablePlugins, _importer, _songSetsToImport];
+    required this.importer,
+    required this.sessionGenerator,
+  });
 }
 
 class LibraryImportEvent {}
@@ -61,9 +51,9 @@ class LibrarySelectImporterEvent extends LibraryImportEvent {
 }
 
 class LibrarySelectSongsToImportEvent extends LibraryImportEvent {
-  final List<BackendSetOfSongsToImport> songSetsToImport;
+  final ImportSessionGenerator sessionGenerator;
 
-  LibrarySelectSongsToImportEvent({required this.songSetsToImport});
+  LibrarySelectSongsToImportEvent({required this.sessionGenerator});
 }
 
 class LibraryImportBloc extends Bloc<LibraryImportEvent, LibraryImportState> {
@@ -73,26 +63,16 @@ class LibraryImportBloc extends Bloc<LibraryImportEvent, LibraryImportState> {
         emit(LibraryImportStateFromImporter(
           availablePlugins: plugins.libraryPlugins.toList(),
           importer: event.importer,
-          songSetsToImport: [],
+          sessionGenerator: null,
         ));
       }
     });
     on<LibrarySelectSongsToImportEvent>((event, emit) {
-      if (event.songSetsToImport.isEmpty) {
-        if (state.importer != null) {
-          emit(LibraryImportStateFromImporter(
-            availablePlugins: plugins.libraryPlugins.toList(),
-            importer: state.importer!,
-            songSetsToImport: [],
-          ));
-        }
-      } else if (event.songSetsToImport.any((songSet) => songSet.backendId == state.importer?.dataBackendId)) {
-        emit(LibraryImportStateFromImporter(
-          availablePlugins: plugins.libraryPlugins.toList(),
-          importer: state.importer!,
-          songSetsToImport: event.songSetsToImport,
-        ));
-      }
+      emit(LibraryImportStateFromImporter(
+        availablePlugins: plugins.libraryPlugins.toList(),
+        importer: state.importer!,
+        sessionGenerator: event.sessionGenerator,
+      ));
     });
   }
 }
@@ -156,10 +136,13 @@ class LibraryImportPage extends StatelessWidget {
                 ),
                 Expanded(child: state.importer?.buildSelectSongSetsToImportWidget(context) ?? EmptyPage()),
                 FilledButton(
-                  onPressed: state.songSetsToImport.isEmpty
+                  onPressed: state.sessionGenerator == null
                       ? null
-                      : () {
-                          context.go("/library/import/finalize", extra: generateImportPlan(state.songSetsToImport));
+                      : () async {
+                          final session = await state.sessionGenerator!(context.read<DbRepo>());
+                          if (context.mounted) {
+                            context.go("/library/import/finalize", extra: session);
+                          }
                         },
                   child: const Text("Select Songs"),
                 )

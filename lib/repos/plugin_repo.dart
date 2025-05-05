@@ -4,7 +4,7 @@ import 'package:turnip_music/repos/db/db_user.dart';
 
 class PluginRepo {
   PluginRepo._(
-    this._libraryDbUser,
+    this.libraryDbUser,
     this._libraryPlugins,
     this._dbUsers,
   );
@@ -23,7 +23,7 @@ class PluginRepo {
     return PluginRepo._(libraryDbUser, libraryPlugins, dbUsers);
   }
 
-  final LibraryDbUser _libraryDbUser;
+  final LibraryDbUser libraryDbUser;
   final List<LibraryPlugin> _libraryPlugins;
   final Map<String, DbUser> _dbUsers;
 
