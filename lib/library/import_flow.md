@@ -43,6 +43,10 @@ MP3 metadata (and android metadata) doesn't have a good way to represent multipl
 
 TODO: need a UI interface to easily set the disc for a given album
 
+TODO: Allow mixing of imports from different backends
+this makes it possible to express
+"import this album from spotify, then import it from my android device" and then you can link them
+
 ```rust
 
 enum ImportActionRef<T> {
