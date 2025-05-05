@@ -1,10 +1,6 @@
 import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:turnip_music/library/importing.dart';
-import 'package:turnip_music/repos/musicbrainz/data.dart';
-import 'package:turnip_music/repos/musicbrainz/musicbrainz_repo.dart';
-import 'package:turnip_music/util/custom_expansion_tile.dart';
 
 /*
 final class LibraryImportFinalizeSet extends StatefulWidget {
@@ -199,10 +195,11 @@ final class LibraryImportFinalizeSetState extends State<LibraryImportFinalizeSet
 */
 
 abstract class EditDialog {
-  void edit(BuildContext context);
+  void edit(BuildContext context, ImportSession session);
 }
 
 class ImportFinalizeActionWidget extends StatelessWidget {
+  final ImportSession session;
   final IconData icon;
   final String text;
   final bool indented;
@@ -210,11 +207,47 @@ class ImportFinalizeActionWidget extends StatelessWidget {
 
   const ImportFinalizeActionWidget({
     super.key,
+    required this.session,
     required this.icon,
     required this.text,
     required this.indented,
     required this.editAction,
   });
+  const ImportFinalizeActionWidget.newTag(this.session, String tagName, {super.key})
+      : icon = Icons.tag,
+        text = "Create/import tag '$tagName'",
+        indented = false,
+        editAction = null;
+  const ImportFinalizeActionWidget.importArtist(this.session, String title, {super.key})
+      : icon = Icons.person,
+        text = title,
+        indented = false,
+        editAction = null;
+  const ImportFinalizeActionWidget.linkOtherToArtist(this.session, String artistName, {super.key})
+      : icon = Icons.person,
+        text = "By '$artistName'",
+        indented = true,
+        editAction = null;
+  const ImportFinalizeActionWidget.importAlbum(this.session, String title, {super.key})
+      : icon = Icons.album,
+        text = title,
+        indented = false,
+        editAction = null;
+  const ImportFinalizeActionWidget.linkSongToAlbum(this.session, String albumName, int disc, int track, {super.key})
+      : icon = Icons.album,
+        text = "Track $disc:$track of '$albumName'",
+        indented = true,
+        editAction = null;
+  const ImportFinalizeActionWidget.linkSongToTag(this.session, {super.key})
+      : icon = Icons.album,
+        text = "Linked to #TODO",
+        indented = true,
+        editAction = null;
+  const ImportFinalizeActionWidget.importSong(this.session, String title, {super.key})
+      : icon = Icons.person,
+        text = title,
+        indented = false,
+        editAction = null;
 
   @override
   Widget build(BuildContext context) {
@@ -230,7 +263,7 @@ class ImportFinalizeActionWidget extends StatelessWidget {
       title: Text(text),
       trailing: (editAction != null)
           ? IconButton(
-              onPressed: () => editAction!.edit(context),
+              onPressed: () => editAction!.edit(context, session),
               icon: Icon(Icons.edit_note),
             )
           : null,
@@ -322,11 +355,9 @@ final class LibraryImportFinalizePage extends StatelessWidget {
       final widgets = <ImportFinalizeActionWidget>[];
       switch (action) {
         case ImportTagAction tag:
-          widgets.add(ImportFinalizeActionWidget(
-            icon: Icons.tag,
-            text: "Create/import tag '${tag.tagName}'",
-            indented: false,
-            editAction: null,
+          widgets.add(ImportFinalizeActionWidget.newTag(
+            session,
+            tag.tagName,
           ));
         case CreateNewArtist artist:
           late String title;
@@ -337,11 +368,9 @@ final class LibraryImportFinalizePage extends StatelessWidget {
           } else {
             title = "Create artist '$backendName'";
           }
-          widgets.add(ImportFinalizeActionWidget(
-            icon: Icons.person,
-            text: title,
-            indented: false,
-            editAction: null,
+          widgets.add(ImportFinalizeActionWidget.importArtist(
+            session,
+            title,
           ));
         case CreateNewAlbum album:
           late String title;
@@ -352,19 +381,15 @@ final class LibraryImportFinalizePage extends StatelessWidget {
           } else {
             title = "Create album '$backendName'";
           }
-          widgets.add(ImportFinalizeActionWidget(
-            icon: Icons.album,
-            text: title,
-            indented: false,
-            editAction: null,
+          widgets.add(ImportFinalizeActionWidget.importAlbum(
+            session,
+            title,
           ));
           for (final linkedArtist in album.linkedArtists) {
             final artistName = session.resolveArtistRefLogicalName(linkedArtist);
-            widgets.add(ImportFinalizeActionWidget(
-              icon: Icons.person,
-              text: "By '$artistName'",
-              indented: true,
-              editAction: null,
+            widgets.add(ImportFinalizeActionWidget.linkOtherToArtist(
+              session,
+              artistName,
             ));
           }
         case CreateNewSong song:
@@ -377,39 +402,30 @@ final class LibraryImportFinalizePage extends StatelessWidget {
           } else {
             title = "Create song '$backendName'";
           }
-          widgets.add(ImportFinalizeActionWidget(
-            icon: Icons.music_note,
-            text: title,
-            indented: false,
-            editAction: null,
+          widgets.add(ImportFinalizeActionWidget.importSong(
+            session,
+            title,
           ));
 
           for (final linkedArtist in song.newLinkedArtists) {
             final artistName = session.resolveArtistRefLogicalName(linkedArtist);
-            widgets.add(ImportFinalizeActionWidget(
-              icon: Icons.person,
-              text: "By '$artistName'",
-              indented: true,
-              editAction: null,
+            widgets.add(ImportFinalizeActionWidget.linkOtherToArtist(
+              session,
+              artistName,
             ));
           }
           if (song.newLinkedAlbum != null) {
             final (albumRef, disc, track) = song.newLinkedAlbum!;
             final albumName = session.resolveAlbumRefLogicalName(albumRef);
-            widgets.add(ImportFinalizeActionWidget(
-              icon: Icons.album,
-              text: "Track $disc:$track of '$albumName'",
-              indented: true,
-              editAction: null,
+            widgets.add(ImportFinalizeActionWidget.linkSongToAlbum(
+              session,
+              albumName,
+              disc,
+              track,
             ));
           }
           if (song.linkToTag != null) {
-            widgets.add(ImportFinalizeActionWidget(
-              icon: Icons.tag,
-              text: "Linked to #TODO",
-              indented: true,
-              editAction: null,
-            ));
+            widgets.add(ImportFinalizeActionWidget.linkSongToTag(session));
           }
 
         case ForcedLinkToExistingArtist artist:
@@ -421,11 +437,9 @@ final class LibraryImportFinalizePage extends StatelessWidget {
           } else {
             title = "Link artist '$backendName'";
           }
-          widgets.add(ImportFinalizeActionWidget(
-            icon: Icons.person,
-            text: title,
-            indented: false,
-            editAction: null,
+          widgets.add(ImportFinalizeActionWidget.importArtist(
+            session,
+            title,
           ));
         case ForcedLinkToExistingAlbum album:
           final backendName = album.importedData.name;
@@ -436,19 +450,15 @@ final class LibraryImportFinalizePage extends StatelessWidget {
           } else {
             title = "Link album '$backendName'";
           }
-          widgets.add(ImportFinalizeActionWidget(
-            icon: Icons.album,
-            text: title,
-            indented: false,
-            editAction: null,
+          widgets.add(ImportFinalizeActionWidget.importAlbum(
+            session,
+            title,
           ));
           for (final linkedArtist in album.linkedArtists) {
             final artistName = session.resolveArtistRefLogicalName(linkedArtist);
-            widgets.add(ImportFinalizeActionWidget(
-              icon: Icons.person,
-              text: "By '$artistName'",
-              indented: true,
-              editAction: null,
+            widgets.add(ImportFinalizeActionWidget.linkOtherToArtist(
+              session,
+              artistName,
             ));
           }
         case ForcedLinkToExistingSong song:
@@ -460,41 +470,33 @@ final class LibraryImportFinalizePage extends StatelessWidget {
           } else {
             title = "Link song '$backendName'";
           }
-          widgets.add(ImportFinalizeActionWidget(
-            icon: Icons.music_note,
-            text: title,
-            indented: false,
-            editAction: null,
+          widgets.add(ImportFinalizeActionWidget.importSong(
+            session,
+            title,
           ));
           for (final linkedArtist in song.newLinkedArtists) {
             final artistName = session.resolveArtistRefLogicalName(linkedArtist);
-            widgets.add(ImportFinalizeActionWidget(
-              icon: Icons.person,
-              text: "By '$artistName'",
-              indented: true,
-              editAction: null,
+            widgets.add(ImportFinalizeActionWidget.linkOtherToArtist(
+              session,
+              artistName,
             ));
           }
           if (song.newLinkedAlbum != null) {
             final (albumRef, disc, track) = song.newLinkedAlbum!;
             final albumName = session.resolveAlbumRefLogicalName(albumRef);
-            widgets.add(ImportFinalizeActionWidget(
-              icon: Icons.album,
-              text: "Track $disc:$track of '$albumName'",
-              indented: true,
-              editAction: null,
+            widgets.add(ImportFinalizeActionWidget.linkSongToAlbum(
+              session,
+              albumName,
+              disc,
+              track,
             ));
           }
           if (song.linkToTag != null) {
-            widgets.add(ImportFinalizeActionWidget(
-              icon: Icons.tag,
-              text: "Linked to #TODO",
-              indented: true,
-              editAction: null,
-            ));
+            widgets.add(ImportFinalizeActionWidget.linkSongToTag(session));
           }
         default:
           widgets.add(ImportFinalizeActionWidget(
+            session: session,
             icon: Icons.question_mark,
             text: "Unknown Action",
             indented: false,
