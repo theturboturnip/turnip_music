@@ -38,6 +38,11 @@ The List cannot be reordered and new Actions cannot be added, but Actions can be
 Actions can be mutated to return a different instance of the same type of logical-thing.
 Actions that create a logical-song may link it to other logical things (playlist, album, tag, artist).
 
+TODO: need to be able to split artists!
+MP3 metadata (and android metadata) doesn't have a good way to represent multiple artists per song, therefore the backend-artist isn't so much a backend-artist as a backend-artist-group. e.g. Turnabout Tunes on my phone has a bunch of 'Aimi Mizunami, Yasumasa Kitagawa'
+
+TODO: need a UI interface to easily set the disc for a given album
+
 ```rust
 
 enum ImportActionRef<T> {

@@ -290,9 +290,12 @@ final class LibraryImportFinalizePage extends StatelessWidget {
         itemBuilder: (context, idx) {
           final action = actions[idx];
           late String title;
+          late IconData mainIcon;
+          final notes = <(IconData, String)>[];
           switch (action) {
             case ImportTagAction tag:
               title = "Create/import tag '${tag.tagName}'";
+              mainIcon = Icons.tag;
             case CreateNewArtist artist:
               final backendName = artist.importedData.name;
               final logicalName = artist.newName;
@@ -301,23 +304,41 @@ final class LibraryImportFinalizePage extends StatelessWidget {
               } else {
                 title = "Create artist '$backendName'";
               }
+              mainIcon = Icons.person;
             case CreateNewAlbum album:
               final backendName = album.importedData.name;
               final logicalName = album.newName;
               if (backendName != logicalName) {
-                title = "Create artist '$backendName' as '$logicalName'";
+                title = "Create album '$backendName' as '$logicalName'";
               } else {
-                title = "Create artist '$backendName'";
+                title = "Create album '$backendName'";
               }
+              for (final linkedArtist in album.linkedArtists) {
+                final artistName = session.resolveArtistRefLogicalName(linkedArtist);
+                notes.add((Icons.person, "By '$artistName'"));
+              }
+              mainIcon = Icons.album;
             case CreateNewSong song:
               final backendName = song.importedData.name;
               final logicalName = song.newName;
-              // TODO attach info about logical album and logical tag
+              for (final linkedArtist in song.newLinkedArtists) {
+                final artistName = session.resolveArtistRefLogicalName(linkedArtist);
+                notes.add((Icons.person, "By '$artistName'"));
+              }
+              if (song.newLinkedAlbum != null) {
+                final (albumRef, disc, track) = song.newLinkedAlbum!;
+                final albumName = session.resolveAlbumRefLogicalName(albumRef);
+                notes.add((Icons.album, "Track $disc:$track of '$albumName'"));
+              }
+              if (song.linkToTag != null) {
+                notes.add((Icons.tag, "Linked to #TODO"));
+              }
               if (backendName != logicalName) {
                 title = "Create song '$backendName' as '$logicalName'";
               } else {
                 title = "Create song '$backendName'";
               }
+              mainIcon = Icons.music_note;
             case ForcedLinkToExistingArtist artist:
               final backendName = artist.importedData.name;
               final logicalName = session.resolveArtistRefLogicalName(artist.existingArtist);
@@ -326,6 +347,7 @@ final class LibraryImportFinalizePage extends StatelessWidget {
               } else {
                 title = "Link artist '$backendName'";
               }
+              mainIcon = Icons.person;
             case ForcedLinkToExistingAlbum album:
               final backendName = album.importedData.name;
               final logicalName = session.resolveAlbumRefLogicalName(album.existingAlbum);
@@ -334,20 +356,48 @@ final class LibraryImportFinalizePage extends StatelessWidget {
               } else {
                 title = "Link album '$backendName'";
               }
+              for (final linkedArtist in album.linkedArtists) {
+                final artistName = session.resolveArtistRefLogicalName(linkedArtist);
+                notes.add((Icons.person, "By '$artistName'"));
+              }
+              mainIcon = Icons.album;
             case ForcedLinkToExistingSong song:
               final backendName = song.importedData.name;
               final logicalName = session.resolveSongRefLogicalName(song.existingSong);
               // TODO attach info about logical album and logical tag
+              for (final linkedArtist in song.newLinkedArtists) {
+                final artistName = session.resolveArtistRefLogicalName(linkedArtist);
+                notes.add((Icons.person, "Linked to Artist '$artistName'"));
+              }
+              if (song.newLinkedAlbum != null) {
+                final (albumRef, disc, track) = song.newLinkedAlbum!;
+                final albumName = session.resolveAlbumRefLogicalName(albumRef);
+                notes.add((Icons.album, "Track $disc:$track of '$albumName'"));
+              }
+              if (song.linkToTag != null) {
+                notes.add((Icons.tag, "Linked to #TODO"));
+              }
               if (backendName != logicalName) {
                 title = "Link song '$backendName' to '$logicalName'";
               } else {
                 title = "Link song '$backendName'";
               }
+              mainIcon = Icons.music_note;
             default:
               title = "Unknown Action";
+              mainIcon = Icons.question_mark;
           }
           return CustomExpansionTile(
+            leading: Icon(mainIcon),
             title: Text(title),
+            trailing: Icon(Icons.edit_note),
+            children: notes.map((data) {
+              final (icon, text) = data;
+              return ListTile(
+                leading: Icon(icon),
+                title: Text(text),
+              );
+            }).toList(),
           );
         },
       ),

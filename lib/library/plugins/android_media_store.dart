@@ -2,6 +2,7 @@ import 'package:android_music_store/album_art_store.dart' as amsalbum;
 import 'package:android_music_store/android_music_store.dart';
 import 'package:android_music_store/data_models.dart' as amsdata;
 import 'package:bloc_concurrency/bloc_concurrency.dart';
+import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:sqflite/sqflite.dart';
@@ -59,25 +60,49 @@ class AndroidMediaStoreSelectorState {
       return (DbRepo db) async {
         final selectedAlbum = albums!.where((a) => a.id == selectedAlbumId).first;
         final session = ImportSession(db: db);
-        final backendArtist = selectedAlbum.mainArtistId == 0
-            ? null
-            : BackendArtist(
-                logicalArtistId: ArtistId.unspecified,
-                backend: androidMediaStoreBackendId,
-                stableId: null,
-                unstableId: selectedAlbum.mainArtistId.toString(),
-                name: selectedAlbum.mainArtist,
-                extra: null,
-                coverArt: null,
-              );
-        final importedAlbumArtists = backendArtist != null
-            ? [
-                await session.addArtist(backendArtist),
-              ]
-            : <ArtistRef>[];
+        final knownArtists = <int, ArtistRef>{};
+        late final List<ArtistRef> importedAlbumArtists;
+        if (selectedAlbum.mainArtistId != 0) {
+          knownArtists[selectedAlbum.mainArtistId] = await session.addArtist(BackendArtist(
+            logicalArtistId: ArtistId.unspecified,
+            backend: androidMediaStoreBackendId,
+            stableId: null,
+            unstableId: selectedAlbum.mainArtistId.toString(),
+            name: selectedAlbum.mainArtist,
+            extra: null,
+            coverArt: null,
+          ));
+          importedAlbumArtists = [
+            knownArtists[selectedAlbum.mainArtistId]!,
+          ];
+        } else {
+          importedAlbumArtists = [];
+        }
+        for (final song in songsInAlbum!) {
+          if (song.mainArtistId != 0 && !knownArtists.containsKey(song.mainArtistId)) {
+            knownArtists[song.mainArtistId] = await session.addArtist(BackendArtist(
+              logicalArtistId: ArtistId.unspecified,
+              backend: androidMediaStoreBackendId,
+              stableId: null,
+              unstableId: song.mainArtistId.toString(),
+              name: song.mainArtist,
+              extra: null,
+              coverArt: null,
+            ));
+          }
+        }
+
         final backendAlbum = amsBackendAlbum(selectedAlbum, songsInAlbum!);
         final album = await session.addAlbum(backendAlbum, importedAlbumArtists);
-        for (final song in songsInAlbum!) {
+        final songs = songsInAlbum!.toList();
+        songs.sortByCompare((song) => (song.discNumber, song.trackNumber), (dtA, dtB) {
+          final cmp1 = dtA.$1.compareTo(dtB.$1);
+          if (cmp1 == 0) {
+            return dtA.$2.compareTo(dtB.$2);
+          }
+          return cmp1;
+        });
+        for (final song in songs) {
           final backendSong = BackendSong(
             logicalSongId: SongId.unspecified,
             backend: androidMediaStoreBackendId,
@@ -90,25 +115,7 @@ class AndroidMediaStoreSelectorState {
             extra: null,
             coverArt: null, // TODO
           );
-          late final List<ArtistRef> artists;
-          if (selectedAlbum.mainArtistId == song.mainArtistId) {
-            artists = importedAlbumArtists;
-          } else if (song.mainArtistId != 0) {
-            // TODO dedupe if multiple songs have the same nonzero mainArtistId
-            // that is not the album main artist
-            final songBackendArtist = BackendArtist(
-              logicalArtistId: ArtistId.unspecified,
-              backend: androidMediaStoreBackendId,
-              stableId: null,
-              unstableId: selectedAlbum.mainArtistId.toString(),
-              name: selectedAlbum.mainArtist,
-              extra: null,
-              coverArt: null,
-            );
-            artists = [await session.addArtist(songBackendArtist)];
-          } else {
-            artists = <ArtistRef>[];
-          }
+          final List<ArtistRef> artists = [song.mainArtistId].map((id) => knownArtists[id]).whereType<ArtistRef>().toList();
 
           await session.addSong(
             backendSong,
