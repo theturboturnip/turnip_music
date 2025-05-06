@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:turnip_music/library/importing.dart';
 import 'package:turnip_music/library/pages/library.dart';
-import 'package:turnip_music/library/pages/library_import.dart';
-import 'package:turnip_music/library/pages/library_import_finalize.dart';
+import 'package:turnip_music/library/pages/library_import_build_session.dart';
+import 'package:turnip_music/library/pages/library_import_tweak_session.dart';
 import 'package:turnip_music/permissions_page.dart';
 import 'package:turnip_music/util/empty_page.dart';
 
@@ -77,10 +77,10 @@ final router = GoRouter(
               path: NavBarRoute.library.route,
               builder: (context, state) => const LibraryPage(),
               routes: [
-                GoRoute(path: "import", builder: (context, state) => const LibraryImportPage(), routes: [
+                GoRoute(path: "import", builder: (context, state) => const LibraryImportBuildSessionPage(), routes: [
                   GoRoute(
                     path: "finalize",
-                    builder: (context, state) => LibraryImportFinalizePage(
+                    builder: (context, state) => LibraryImportTweakSessionPage(
                       state.extra as ImportSession,
                     ),
                   )

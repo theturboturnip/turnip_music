@@ -77,8 +77,8 @@ class LibraryImportBloc extends Bloc<LibraryImportEvent, LibraryImportState> {
   }
 }
 
-class LibraryImportPage extends StatelessWidget {
-  const LibraryImportPage({super.key});
+class LibraryImportBuildSessionPage extends StatelessWidget {
+  const LibraryImportBuildSessionPage({super.key});
 
   Widget _buildImporterSelector(BuildContext context, LibraryImportState state) {
     // return ExpansionTile(

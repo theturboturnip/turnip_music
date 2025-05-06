@@ -239,12 +239,12 @@ class ImportFinalizeActionWidget extends StatelessWidget {
         indented = true,
         editAction = null;
   const ImportFinalizeActionWidget.linkSongToTag(this.session, {super.key})
-      : icon = Icons.album,
+      : icon = Icons.tag,
         text = "Linked to #TODO",
         indented = true,
         editAction = null;
   const ImportFinalizeActionWidget.importSong(this.session, String title, {super.key})
-      : icon = Icons.person,
+      : icon = Icons.music_note,
         text = title,
         indented = false,
         editAction = null;
@@ -271,8 +271,8 @@ class ImportFinalizeActionWidget extends StatelessWidget {
   }
 }
 
-final class LibraryImportFinalizePage extends StatelessWidget {
-  const LibraryImportFinalizePage(this.session, {super.key});
+final class LibraryImportTweakSessionPage extends StatelessWidget {
+  const LibraryImportTweakSessionPage(this.session, {super.key});
 
   final ImportSession session;
 

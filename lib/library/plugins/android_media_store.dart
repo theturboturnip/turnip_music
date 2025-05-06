@@ -11,7 +11,7 @@ import 'package:turnip_music/library/data/tag_album.dart';
 import 'package:turnip_music/library/data/tag_artist.dart';
 import 'package:turnip_music/library/importing.dart';
 import 'package:turnip_music/library/library_plugin.dart';
-import 'package:turnip_music/library/pages/library_import.dart';
+import 'package:turnip_music/library/pages/library_import_build_session.dart';
 import 'package:turnip_music/repos/db/db_repo.dart';
 
 const androidMediaStoreBackendId = "ams";
