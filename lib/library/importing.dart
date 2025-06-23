@@ -10,7 +10,9 @@ import 'package:turnip_music/repos/db/db_repo.dart';
 
 abstract class Action<T> {
   // TODO make this abstract
-  Future<void> execute(DatabaseExecutor txn, ImportSession session, LibraryDbUser library) async {}
+  Future<void> execute(DatabaseExecutor txn, ImportSession session, LibraryDbUser library) async {
+    throw UnimplementedError();
+  }
 }
 
 class ActionRef<TData, T extends Action<TData>> {
